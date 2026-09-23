@@ -15,6 +15,9 @@ from bot.app import create_bot_app
 from bot.notifier import TelegramNotifier
 from core.market_hours import MarketHours
 from market.client import AsyncMarketClient
+from storage.repository import Repository, PaperTradingRepository
+from strategy.paper_engine import PaperEngine
+from strategy.auto_trader import AutoTrader
 
 def setup_logging():
     os.makedirs("logs", exist_ok=True)
@@ -62,18 +65,30 @@ async def main():
         logger.error(f"Failed initial DNSE connection: {e}")
         await repo.log_audit("ERROR", "DNSE_API", f"Initial sync failed: {e}")
 
-    # 3. Telegram Bot
-    bot, dp = create_bot_app(settings, client, state, repo)
+    # 3. Paper Trading Engine (Simulation with 5,000,000 VND)
+    paper_repo = PaperTradingRepository(settings.DB_PATH)
+    paper_engine = PaperEngine(paper_repo)
+    await paper_engine.initialize(5_000_000.0)
+
+    # 4. Telegram Bot
+    bot, dp = create_bot_app(settings, client, state, repo, paper_engine=paper_engine, paper_repo=paper_repo)
     notifier = TelegramNotifier(bot, settings.TELEGRAM_CHAT_ID)
 
-    # 4. Background Scheduler & Market Client
+    # 5. Auto-Trader Service
+    auto_trader = AutoTrader(
+        engine=paper_engine,
+        state=state,
+        notify_func=lambda msg: notifier.send_alert("Tín Hiệu Auto-Trade Giả Lập", msg, level="INFO")
+    )
+
+    # 6. Background Scheduler & Market Client
     market_client = AsyncMarketClient()
-    scheduler = setup_scheduler(client, state, repo, notifier, market_client=market_client)
+    scheduler = setup_scheduler(client, state, repo, notifier, market_client=market_client, auto_trader=auto_trader)
     scheduler.start()
 
     # Trigger initial market sync in background
     from core.scheduler import sync_market_data_job
-    asyncio.create_task(sync_market_data_job(market_client, state, repo, notifier))
+    asyncio.create_task(sync_market_data_job(market_client, state, repo, notifier, None, auto_trader))
 
     # 5. Startup Notification
     acc_name = state.account.name if state.account else 'Chưa kết nối'
