@@ -1,0 +1,30 @@
+# Environment & Secrets
+.env
+API.txt
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Database & Local Storage
+*.db
+*.sqlite3
+storage/*.db
+
+# Logs
+logs/
+*.log
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
