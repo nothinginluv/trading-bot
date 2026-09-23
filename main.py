@@ -1,0 +1,91 @@
+import asyncio
+import logging
+import sys
+from logging.handlers import RotatingFileHandler
+import os
+
+from config.settings import settings
+from storage.db import init_db
+from storage.repository import Repository
+from core.state import TradingState
+from core.scheduler import setup_scheduler
+from dnse.client import DNSEClient
+from dnse.mock_client import MockDNSEClient
+from bot.app import create_bot_app
+from bot.notifier import TelegramNotifier
+
+def setup_logging():
+    os.makedirs("logs", exist_ok=True)
+    log_format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    handlers = [
+        logging.StreamHandler(sys.stdout),
+        RotatingFileHandler("logs/tradingbot.log", maxBytes=10*1024*1024, backupCount=5, encoding="utf-8")
+    ]
+    logging.basicConfig(level=settings.LOG_LEVEL, format=log_format, handlers=handlers)
+
+async def main():
+    setup_logging()
+    logger = logging.getLogger("main")
+    logger.info("Initializing AI Auto Trading Bot (Phase 1: Read-Only MVP)...")
+
+    # 1. Initialize SQLite Database
+    await init_db(settings.DB_PATH)
+    repo = Repository(settings.DB_PATH)
+    await repo.log_audit("INFO", "SYSTEM", "Bot started on Windows machine")
+
+    # 2. State & DNSE Client
+    state = TradingState()
+    if settings.DRY_RUN:
+        logger.info("Running in DRY_RUN mode (Mock Client)")
+        client = MockDNSEClient()
+    else:
+        logger.info("Connecting to LIVE DNSE OpenAPI...")
+        client = DNSEClient(
+            api_key=settings.DNSE_API_KEY,
+            api_secret=settings.DNSE_API_SECRET
+        )
+
+    # Initial sync
+    try:
+        account_info = await client.get_accounts()
+        state.set_account(account_info)
+        logger.info(f"Connected to DNSE! Account: {account_info.name} ({account_info.custodyCode})")
+        sub_id = account_info.accounts[0].id
+        bal = await client.get_balances(sub_id)
+        pos = await client.get_positions(sub_id)
+        state.set_balance(bal)
+        state.set_positions(pos)
+        await repo.save_balance_snapshot(sub_id, bal.stock.totalCash, bal.stock.availableCash, bal.stock.totalDebt, bal.stock.withdrawableCash)
+    except Exception as e:
+        logger.error(f"Failed initial DNSE connection: {e}")
+        await repo.log_audit("ERROR", "DNSE_API", f"Initial sync failed: {e}")
+
+    # 3. Telegram Bot
+    bot, dp = create_bot_app(settings, client, state, repo)
+    notifier = TelegramNotifier(bot, settings.TELEGRAM_CHAT_ID)
+
+    # 4. Background Scheduler
+    scheduler = setup_scheduler(client, state, repo, notifier)
+    scheduler.start()
+
+    # 5. Startup Notification
+    acc_name = state.account.name if state.account else 'Chưa kết nối'
+    cash = state.balance.stock.availableCash if state.balance else 0
+    await notifier.send_alert(
+        "Bot đã khởi động thành công",
+        f"• Máy chủ: Local Windows PC\n• Chủ tài khoản: {acc_name}\n• Tiền khả dụng: {cash:,.0f} đ\n• Chế độ: READ_ONLY",
+        level="INFO"
+    )
+
+    # 6. Run Polling
+    try:
+        logger.info("Starting Telegram Bot Polling...")
+        await dp.start_polling(bot)
+    finally:
+        logger.info("Shutting down...")
+        scheduler.shutdown()
+        await client.close()
+        await bot.session.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())
