@@ -40,6 +40,12 @@ class TradingState:
         self.vn30_summaries = summaries
         self.last_market_sync_time = time.time()
 
+    def update_candles(self, symbol: str, series: OHLCVSeries):
+        self.vn30_candles[symbol.upper()] = series
+
+    def update_summary(self, symbol: str, summary: TechnicalSummary):
+        self.vn30_summaries[symbol.upper()] = summary
+
     def get_summary(self, symbol: str) -> Optional[TechnicalSummary]:
         return self.vn30_summaries.get(symbol.upper())
 

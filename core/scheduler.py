@@ -37,7 +37,7 @@ async def daily_summary_job(state, notifier):
     )
     await notifier.send_alert("Tổng kết cuối phiên", msg, level="INFO")
 
-async def sync_market_data_job(market_client, state, repo, notifier=None, symbols=None):
+async def sync_market_data_job(market_client, state, repo, notifier=None, symbols=None, auto_trader=None):
     if not market_client:
         return
     from config.constants import VN30_SYMBOLS
@@ -64,17 +64,22 @@ async def sync_market_data_job(market_client, state, repo, notifier=None, symbol
 
         state.set_market_data(candles_dict, summaries_dict)
         logger.info(f"Market sync complete: {len(summaries_dict)}/{len(target_symbols)} VN30 tickers calculated.")
+
+        # Process Auto-Trader cycle
+        if auto_trader:
+            await auto_trader.process_cycle()
+
     except Exception as e:
         logger.error(f"Market sync job failed: {e}")
         await repo.log_audit("ERROR", "MARKET_SYNC", f"Sync failed: {e}")
 
-def setup_scheduler(client, state, repo, notifier=None, market_client=None) -> AsyncIOScheduler:
+def setup_scheduler(client, state, repo, notifier=None, market_client=None, auto_trader=None) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
     # Periodic portfolio sync: every 60 seconds
     scheduler.add_job(sync_data_job, "interval", seconds=60, args=[client, state, repo, notifier])
     # Periodic market sync: every 3 minutes (180s)
     if market_client:
-        scheduler.add_job(sync_market_data_job, "interval", seconds=180, args=[market_client, state, repo, notifier])
+        scheduler.add_job(sync_market_data_job, "interval", seconds=180, args=[market_client, state, repo, notifier, None, auto_trader])
     # Daily market summary at 15:05 Mon-Fri
     scheduler.add_job(daily_summary_job, "cron", day_of_week="mon-fri", hour=15, minute=5, args=[state, notifier])
     return scheduler
