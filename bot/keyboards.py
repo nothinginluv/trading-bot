@@ -5,6 +5,8 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="💼 Tài khoản Giả lập"), KeyboardButton(text="🎯 Tín hiệu VN30")],
         [KeyboardButton(text="💰 Số dư"), KeyboardButton(text="📊 Vị thế")],
         [KeyboardButton(text="🔍 Quét VN30"), KeyboardButton(text="📈 Bảng giá VN30")],
-        [KeyboardButton(text="🔄 Làm mới"), KeyboardButton(text="ℹ️ Trạng thái")]
+        [KeyboardButton(text="⚙️ Chế độ GD"), KeyboardButton(text="📋 Sổ lệnh Thật")],
+        [KeyboardButton(text="🛑 CẦU DAO KHẨN CẤP"), KeyboardButton(text="ℹ️ Trạng thái")]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+

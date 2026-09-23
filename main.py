@@ -18,6 +18,8 @@ from market.client import AsyncMarketClient
 from storage.repository import Repository, PaperTradingRepository
 from strategy.paper_engine import PaperEngine
 from strategy.auto_trader import AutoTrader
+from core.risk_safeguards import RiskSafeguards, TradingMode
+from strategy.live_trader import LiveTrader
 
 def setup_logging():
     os.makedirs("logs", exist_ok=True)
@@ -70,18 +72,35 @@ async def main():
     paper_engine = PaperEngine(paper_repo)
     await paper_engine.initialize(5_000_000.0)
 
-    # 4. Telegram Bot
-    bot, dp = create_bot_app(settings, client, state, repo, paper_engine=paper_engine, paper_repo=paper_repo)
-    notifier = TelegramNotifier(bot, settings.TELEGRAM_CHAT_ID)
+    # 4. Risk Safeguards & Live Trader Dispatcher
+    safeguards = RiskSafeguards()
+    sub_id = state.account.accounts[0].id if (state.account and state.account.accounts) else "0001880229"
+    live_trader = LiveTrader(
+        client=client,
+        safeguards=safeguards,
+        account_no=sub_id
+    )
 
-    # 5. Auto-Trader Service
+    # 5. Telegram Bot
+    bot, dp = create_bot_app(
+        settings, client, state, repo,
+        paper_engine=paper_engine,
+        paper_repo=paper_repo,
+        safeguards=safeguards,
+        live_trader=live_trader
+    )
+    notifier = TelegramNotifier(bot, settings.TELEGRAM_CHAT_ID)
+    live_trader.notify_func = lambda msg: notifier.send_alert("Giao Dịch Thật", msg, level="INFO")
+
+    # 6. Auto-Trader Service
     auto_trader = AutoTrader(
         engine=paper_engine,
         state=state,
-        notify_func=lambda msg: notifier.send_alert("Tín Hiệu Auto-Trade Giả Lập", msg, level="INFO")
+        notify_func=lambda msg: notifier.send_alert("Tín Hiệu Auto-Trade Giả Lập", msg, level="INFO"),
+        live_trader=live_trader
     )
 
-    # 6. Background Scheduler & Market Client
+    # 7. Background Scheduler & Market Client
     market_client = AsyncMarketClient()
     scheduler = setup_scheduler(client, state, repo, notifier, market_client=market_client, auto_trader=auto_trader)
     scheduler.start()
@@ -90,7 +109,7 @@ async def main():
     from core.scheduler import sync_market_data_job
     asyncio.create_task(sync_market_data_job(market_client, state, repo, notifier, None, auto_trader))
 
-    # 5. Startup Notification
+    # 8. Startup Notification
     acc_name = state.account.name if state.account else 'Chưa kết nối'
     sub_id = state.account.accounts[0].id if (state.account and state.account.accounts) else 'N/A'
     custody = state.account.custodyCode if state.account else 'N/A'
@@ -104,7 +123,7 @@ async def main():
         f"• **Tiểu khoản:** `{sub_id}`\n"
         f"• **Tiền khả dụng:** `{cash:,.0f} đ`\n"
         f"• **Phiên thị trường:** {session_text}\n"
-        f"• **Chế độ:** READ_ONLY (An toàn vốn)",
+        f"• **Chế độ:** {safeguards.mode.value} (An toàn vốn)",
         level="INFO"
     )
 
