@@ -33,6 +33,31 @@ Hệ thống Bot Giao Dịch Tự Động trên Thị Trường Chứng Khoán V
   - `/autotrade_paper [on|off]`: Bật/Tắt chế độ tự động đi lệnh ảo khi có tín hiệu.
   - `/reset_paper`: Đặt lại tài khoản giả lập về 5.000.000 VNĐ.
 
+### Phase 4: Live Order Execution & Risk Safeguards (`v0.4.0-live`)
+- **Kết nối Đặt lệnh Thật DNSE OpenAPI**:
+  - Khởi tạo và ký HMAC-SHA256 chuẩn cho các endpoint đặt lệnh (`POST /accounts/{accountNo}/orders?marketType=STOCK&orderCategory=NORMAL`), tra cứu gói vay Margin/Deal (`GET /accounts/{accountNo}/loan-packages`), tra cứu sổ lệnh (`GET /accounts/{accountNo}/orders`), hủy lệnh (`DELETE /accounts/{accountNo}/orders/{orderId}`).
+  - Xử lý xác thực tự động trực tiếp bằng `API Key` & `API Secret` mà không làm gián đoạn hệ thống.
+- **3 Chế độ Giao dịch Linh hoạt (Trading Modes)**:
+  - `PAPER` *(Mặc định khi khởi động)*: Chế độ an toàn tuyệt đối, chỉ chạy mô phỏng giả lập, bảo vệ 100% tiền thật.
+  - `LIVE_CONFIRM`: Chế độ Bán tự động (Semi-Auto) — Khi phát hiện cơ hội giao dịch, bot gửi thông báo kèm nút bấm Inline Keyboard `[✅ Xác nhận ĐẶT LỆNH THẬT]` và `[❌ Hủy bỏ]`. Chỉ khi Admin bấm duyệt lệnh mới được đẩy lên sàn HOSE.
+  - `LIVE_AUTO`: Chế độ Tự động hoàn toàn (Full Auto) — Bot tự động gửi lệnh thật lên sàn ngay khi các chỉ báo kỹ thuật hội tụ đủ điều kiện mua/bán.
+- **Hệ thống Bảo vệ & Quản trị Rủi ro (Risk Safeguards)**:
+  - **Hạn mức giá trị lệnh (Max Gross Value)**: Tối đa 5.000.000 VNĐ cho mỗi lệnh đặt.
+  - **Giới hạn số lệnh ngày (Daily Rate Limiting)**: Tối đa 5 lệnh đặt/ngày để kiểm soát chi phí giao dịch và tránh over-trading.
+  - **Kiểm soát biên độ trần/sàn HOSE ($\pm 7\%$)**: Từ chối đặt giá vượt quá biên độ cho phép so với giá tham chiếu.
+- **Cầu Dao Khẩn Cấp (Emergency Kill Switch)**:
+  - Kích hoạt qua lệnh `/kill_switch` hoặc nút bấm chuyên dụng trên bàn phím Telegram.
+  - Tức thì hủy bỏ tất cả lệnh đang chờ khớp trên sàn HOSE và khóa chặt hệ thống về chế độ `READ_ONLY`.
+  - Khôi phục hệ thống an toàn qua lệnh `/resume`.
+- **Lệnh Telegram Live Trading**:
+  - `/mode [paper|live_confirm|live_auto]`: Tra cứu và thay đổi chế độ giao dịch.
+  - `/buy_live <MÃ> <KL> [GIÁ]`: Đặt lệnh mua thật thủ công lên sàn HOSE.
+  - `/sell_live <MÃ> <KL> [GIÁ]`: Đặt lệnh bán thật thủ công lên sàn HOSE.
+  - `/orders_live`: Tra cứu sổ lệnh thật trong ngày từ DNSE OpenAPI.
+  - `/cancel_live <MÃ_LỆNH>`: Gửi yêu cầu hủy lệnh đang chờ trên sàn.
+  - `/kill_switch`: Ngắt cầu dao khẩn cấp, hủy lệnh và khóa giao dịch.
+  - `/resume`: Mở lại cầu dao và khôi phục hệ thống.
+
 ## Hướng dẫn Chạy Bot
 
 ```bash
