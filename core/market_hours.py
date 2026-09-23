@@ -37,3 +37,16 @@ class MarketHours:
     def is_trading_time(cls, dt: datetime = None) -> bool:
         session = cls.get_session(dt)
         return session in ("ATO", "CONTINUOUS", "ATC")
+
+    @classmethod
+    def get_session_display(cls, dt: datetime = None) -> str:
+        session = cls.get_session(dt)
+        mapping = {
+            "PRE_MARKET": "Tiền thị trường (Chờ mở cửa)",
+            "ATO": "Khớp lệnh định kỳ mở cửa (ATO)",
+            "CONTINUOUS": "Khớp lệnh liên tục",
+            "LUNCH_BREAK": "Nghỉ trưa",
+            "ATC": "Khớp lệnh định kỳ đóng cửa (ATC)",
+            "CLOSED": "Thị trường đóng cửa"
+        }
+        return mapping.get(session, session)

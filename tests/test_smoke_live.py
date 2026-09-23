@@ -47,8 +47,8 @@ async def test_live_smoke_startup(tmp_path):
     bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
     notifier = TelegramNotifier(bot, settings.TELEGRAM_CHAT_ID)
     await notifier.send_alert(
-        "Kiem thu Live Smoke Test",
-        f"• Tai khoan: {accounts.name} ({accounts.custodyCode})\n• Tieu khoan: {sub_id}\n• Tien kha dung: {bal.stock.availableCash:,.0f} d\n• Trang thai: 100% San sang!",
+        "Kiểm Thử Kết Nối Live Smoke Test",
+        f"• Tài khoản: {accounts.name} ({accounts.custodyCode})\n• Tiểu khoản: {sub_id}\n• Tiền khả dụng: {bal.stock.availableCash:,.0f} đ\n• Trạng thái: 100% Sẵn sàng hoạt động!",
         level="INFO"
     )
     

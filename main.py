@@ -13,6 +13,7 @@ from dnse.client import DNSEClient
 from dnse.mock_client import MockDNSEClient
 from bot.app import create_bot_app
 from bot.notifier import TelegramNotifier
+from core.market_hours import MarketHours
 
 def setup_logging():
     os.makedirs("logs", exist_ok=True)
@@ -70,10 +71,19 @@ async def main():
 
     # 5. Startup Notification
     acc_name = state.account.name if state.account else 'Chưa kết nối'
+    sub_id = state.account.accounts[0].id if (state.account and state.account.accounts) else 'N/A'
+    custody = state.account.custodyCode if state.account else 'N/A'
     cash = state.balance.stock.availableCash if state.balance else 0
+    session_text = MarketHours.get_session_display()
+    
     await notifier.send_alert(
-        "Bot đã khởi động thành công",
-        f"• Máy chủ: Local Windows PC\n• Chủ tài khoản: {acc_name}\n• Tiền khả dụng: {cash:,.0f} đ\n• Chế độ: READ_ONLY",
+        "Hệ Thống Đã Khởi Động Thành Công",
+        f"• **Máy chủ:** Windows Local PC\n"
+        f"• **Chủ tài khoản:** {acc_name} (`{custody}`)\n"
+        f"• **Tiểu khoản:** `{sub_id}`\n"
+        f"• **Tiền khả dụng:** `{cash:,.0f} đ`\n"
+        f"• **Phiên thị trường:** {session_text}\n"
+        f"• **Chế độ:** READ_ONLY (An toàn vốn)",
         level="INFO"
     )
 
