@@ -50,6 +50,62 @@ CREATE TABLE IF NOT EXISTS daily_candles (
     PRIMARY KEY (symbol, timestamp)
 );
 CREATE INDEX IF NOT EXISTS idx_candles_symbol_time ON daily_candles(symbol, timestamp DESC);
+
+CREATE TABLE IF NOT EXISTS paper_account (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    initial_balance REAL NOT NULL DEFAULT 5000000.0,
+    cash_balance REAL NOT NULL DEFAULT 5000000.0,
+    auto_trade_enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS paper_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL UNIQUE,
+    total_quantity INTEGER NOT NULL DEFAULT 0,
+    available_quantity INTEGER NOT NULL DEFAULT 0,
+    avg_buy_price REAL NOT NULL DEFAULT 0.0,
+    highest_price REAL NOT NULL DEFAULT 0.0,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS paper_settlement_tranches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    buy_date TEXT NOT NULL,
+    settle_date TEXT NOT NULL,
+    is_settled INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS paper_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id TEXT NOT NULL UNIQUE,
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    order_type TEXT NOT NULL DEFAULT 'MP',
+    price REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'FILLED',
+    fee REAL NOT NULL DEFAULT 0.0,
+    tax REAL NOT NULL DEFAULT 0.0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS paper_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    price REAL NOT NULL,
+    fee REAL NOT NULL,
+    tax REAL NOT NULL,
+    realized_pnl REAL NOT NULL DEFAULT 0.0,
+    executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 async def init_db(db_path: str = "storage/bot.db"):
