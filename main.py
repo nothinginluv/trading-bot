@@ -14,6 +14,7 @@ from dnse.mock_client import MockDNSEClient
 from bot.app import create_bot_app
 from bot.notifier import TelegramNotifier
 from core.market_hours import MarketHours
+from market.client import AsyncMarketClient
 
 def setup_logging():
     os.makedirs("logs", exist_ok=True)
@@ -65,9 +66,14 @@ async def main():
     bot, dp = create_bot_app(settings, client, state, repo)
     notifier = TelegramNotifier(bot, settings.TELEGRAM_CHAT_ID)
 
-    # 4. Background Scheduler
-    scheduler = setup_scheduler(client, state, repo, notifier)
+    # 4. Background Scheduler & Market Client
+    market_client = AsyncMarketClient()
+    scheduler = setup_scheduler(client, state, repo, notifier, market_client=market_client)
     scheduler.start()
+
+    # Trigger initial market sync in background
+    from core.scheduler import sync_market_data_job
+    asyncio.create_task(sync_market_data_job(market_client, state, repo, notifier))
 
     # 5. Startup Notification
     acc_name = state.account.name if state.account else 'Chưa kết nối'
@@ -95,6 +101,7 @@ async def main():
         logger.info("Shutting down...")
         scheduler.shutdown()
         await client.close()
+        await market_client.close()
         await bot.session.close()
 
 if __name__ == "__main__":
