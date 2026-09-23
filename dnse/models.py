@@ -40,3 +40,28 @@ class PositionItem(BaseModel):
 
 class PositionsResponse(BaseModel):
     positions: List[PositionItem] = []
+
+class LoanPackage(BaseModel):
+    id: int
+    name: str
+    type: str = "N"
+    brokerFirmBuyingFeeRate: float = 0.0012
+    brokerFirmSellingFeeRate: float = 0.0012
+
+class LiveOrder(BaseModel):
+    id: str
+    symbol: str
+    side: str
+    orderType: str
+    quantity: int
+    price: float
+    orderStatus: str = "PENDING"
+    filledQuantity: int = 0
+    loanPackageId: Optional[int] = None
+    createdTime: Optional[str] = None
+
+class OrderPlacementResult(BaseModel):
+    success: bool
+    order_id: Optional[str] = None
+    message: str
+    raw: dict = Field(default_factory=dict)
