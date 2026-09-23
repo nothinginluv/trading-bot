@@ -25,9 +25,9 @@ Phase 2 builds the **Market Data Feed & Technical Indicator Engine** for the AI 
 The VN30 universe is configured in [config/constants.py](file:///d:/TradingBot/config/constants.py):
 ```python
 VN30_SYMBOLS = [
-    "ACB", "BCM", "BID", "BVH", "CTG", "FPT", "GAS", "GVR", "HDB", "HPG",
-    "MBB", "MSN", "MWG", "PLX", "POW", "SAB", "SHB", "SSB", "SSI", "STB",
-    "TCB", "TPB", "VCB", "VHM", "VIB", "VIC", "VJC", "VNM", "VPB", "VRE"
+    "ACB", "BID", "BSR", "BVH", "CTG", "FPT", "GAS", "GVR", "HDB", "HPG",
+    "MBB", "MCH", "MSN", "MWG", "POW", "SAB", "SSB", "SSI", "STB", "TCB",
+    "TCX", "VCB", "VHM", "VIB", "VIC", "VJC", "VNM", "VPB", "VPL", "VRE"
 ]
 ```
 
