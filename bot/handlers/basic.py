@@ -13,11 +13,16 @@ async def cmd_start(message: Message, state_obj):
     text = (
         "🤖 **Chào mừng bạn đến với AI Auto Trading Bot!**\n"
         "*(Chế độ: READ_ONLY — An toàn vốn tuyệt đối)*\n\n"
-        "Các lệnh khả dụng:\n"
+        "**Các lệnh tra cứu tài khoản:**\n"
         "• `/balance` hoặc bấm 💰 Số dư\n"
         "• `/positions` hoặc bấm 📊 Vị thế\n"
         "• `/sync` hoặc bấm 🔄 Làm mới\n"
-        "• `/status` hoặc bấm ℹ️ Trạng thái"
+        "• `/status` hoặc bấm ℹ️ Trạng thái\n\n"
+        "**Các lệnh thị trường & chỉ báo (VN30):**\n"
+        "• `/quote <MÃ>` (hoặc `/q <MÃ>`): Xem giá & nến ngày\n"
+        "• `/indicators <MÃ>` (hoặc `/i <MÃ>`): Phân tích kỹ thuật (EMA, RSI, MACD, BB)\n"
+        "• `/scan` hoặc bấm 🔍 Quét VN30: Lọc cổ phiếu bùng nổ, quá bán, quá mua\n"
+        "• `/vn30` hoặc bấm 📈 Bảng giá VN30: Top tăng/giảm mạnh nhất"
     )
     await message.answer(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
 

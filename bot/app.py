@@ -1,6 +1,6 @@
 from aiogram import Bot, Dispatcher
 from bot.middlewares import WhitelistMiddleware
-from bot.handlers import basic, portfolio
+from bot.handlers import basic, portfolio, market
 
 def create_bot_app(settings, client, state, repo):
     bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
@@ -19,5 +19,6 @@ def create_bot_app(settings, client, state, repo):
     # Include routers
     dp.include_router(basic.router)
     dp.include_router(portfolio.router)
+    dp.include_router(market.router)
 
     return bot, dp
