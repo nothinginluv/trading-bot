@@ -79,3 +79,49 @@ async def test_auto_trader_buy_trigger_and_exit(tmp_path):
     # Verify position sold
     pos_after_sl = await repo.get_position("HPG")
     assert pos_after_sl is None or pos_after_sl.total_quantity == 0
+
+
+@pytest.mark.asyncio
+async def test_auto_trader_with_live_trader(tmp_path):
+    from dnse.mock_client import MockDNSEClient
+    from core.risk_safeguards import RiskSafeguards, TradingMode
+    from strategy.live_trader import LiveTrader
+
+    test_db = str(tmp_path / "test_auto_trader_live.db")
+    await init_db(test_db)
+    repo = PaperTradingRepository(db_path=test_db)
+    engine = PaperEngine(repo)
+    await engine.initialize(5000000.0)
+
+    client = MockDNSEClient()
+    safeguards = RiskSafeguards()
+    safeguards.set_mode(TradingMode.LIVE_CONFIRM)
+    live_trader = LiveTrader(client=client, safeguards=safeguards, account_no="0001880229")
+
+    state = TradingState()
+    notifier = AsyncMock()
+    trader = AutoTrader(engine=engine, state=state, notify_func=notifier, live_trader=live_trader)
+
+    # Add breakout series
+    candles = []
+    base_price = 25000.0
+    for i in range(50):
+        c = base_price + i * 200.0
+        candles.append(Candle(
+            timestamp=1700000000 + i * 86400,
+            date_str=f"2026-01-{(i%30)+1:02d}",
+            open=c - 100, high=c + 100, low=c - 100, close=c,
+            volume=1000000 if i < 49 else 2500000
+        ))
+    series = OHLCVSeries(symbol="HPG", resolution="1D", candles=candles)
+    summary = compute_technical_summary(series)
+    state.update_candles("HPG", series)
+    state.update_summary("HPG", summary)
+
+    # Process cycle -> should generate pending confirmation for live order
+    alerts = await trader.process_cycle()
+    assert any("YÊU CẦU XÁC NHẬN" in a for a in alerts)
+    assert len(live_trader.pending_confirmations) == 1
+
+    await client.close()
+

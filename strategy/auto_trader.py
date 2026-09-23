@@ -5,6 +5,10 @@ from strategy.models import OrderStatus, SignalType
 from strategy.signals import scan_signals
 from strategy.risk import calculate_position_size, check_exit_conditions
 from core.state import TradingState
+from core.risk_safeguards import TradingMode
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from strategy.live_trader import LiveTrader
 
 class AutoTrader:
     """
@@ -17,11 +21,13 @@ class AutoTrader:
         self,
         engine: PaperEngine,
         state: TradingState,
-        notify_func: Optional[Callable[[str], Awaitable[None]]] = None
+        notify_func: Optional[Callable[[str], Awaitable[None]]] = None,
+        live_trader: Optional["LiveTrader"] = None
     ):
         self.engine = engine
         self.state = state
         self.notify_func = notify_func
+        self.live_trader = live_trader
 
     async def process_cycle(self) -> List[str]:
         alerts: List[str] = []
@@ -60,6 +66,17 @@ class AutoTrader:
                         alerts.append(alert)
                         if self.notify_func:
                             await self.notify_func(alert)
+
+                    if self.live_trader and self.live_trader.safeguards.mode in (TradingMode.LIVE_CONFIRM, TradingMode.LIVE_AUTO):
+                        await self.live_trader.route_order(
+                            symbol=pos.symbol,
+                            side="NS",
+                            quantity=pos.available_quantity,
+                            price=cur_price,
+                            reference_price=cur_price,
+                            strategy_name="EXIT",
+                            reason=reason
+                        )
                 else:
                     alert = (
                         f"⚠️ [CẢNH BÁO VI PHẠM] {pos.symbol} thỏa mãn bán ({reason})\n"
@@ -96,8 +113,8 @@ class AutoTrader:
                     qty = calculate_position_size(account.cash_balance, account.nav, top_signal.price)
                     if qty >= 1:
                         order = await self.engine.execute_buy(top_signal.symbol, qty, top_signal.price)
+                        lot_type = "Lô chẵn" if qty >= 100 else "Lô lẻ"
                         if order.status == OrderStatus.FILLED:
-                            lot_type = "Lô chẵn" if qty >= 100 else "Lô lẻ"
                             alert = (
                                 f"🚀 [AUTO-TRADE MUA GIẢ LẬP] {top_signal.symbol}\n"
                                 f"- Chiến lược: {top_signal.strategy.value}\n"
@@ -108,5 +125,29 @@ class AutoTrader:
                             alerts.append(alert)
                             if self.notify_func:
                                 await self.notify_func(alert)
+
+                        if self.live_trader and self.live_trader.safeguards.mode in (TradingMode.LIVE_CONFIRM, TradingMode.LIVE_AUTO):
+                            live_res = await self.live_trader.route_order(
+                                symbol=top_signal.symbol,
+                                side="NB",
+                                quantity=qty,
+                                price=top_signal.price,
+                                reference_price=top_signal.price,
+                                strategy_name=top_signal.strategy.value,
+                                reason=top_signal.reason
+                            )
+                            if live_res.get("status") == "PENDING_CONFIRMATION":
+                                confirm_id = live_res["confirm_id"]
+                                alert = (
+                                    f"⚠️ [YÊU CẦU XÁC NHẬN LỆNH THẬT]\n"
+                                    f"• Mã: {top_signal.symbol} | Mua: {qty:,} cp | Giá: {top_signal.price:,.0f} đ\n"
+                                    f"• Mã xác nhận: `{confirm_id}`\n"
+                                    f"• Hãy xác nhận trên bot để gửi lệnh lên sàn HOSE!"
+                                )
+                                alerts.append(alert)
+                                if self.notify_func:
+                                    await self.notify_func(alert)
+                            elif live_res.get("status") == "EXECUTED":
+                                alerts.append(f"🔥 [LỆNH THẬT ĐÃ ĐƯỢC GỬI SÀN] {top_signal.symbol} {qty:,} cp @ {top_signal.price:,.0f}")
 
         return alerts
