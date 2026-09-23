@@ -36,6 +36,20 @@ CREATE TABLE IF NOT EXISTS system_config (
     value TEXT NOT NULL,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS daily_candles (
+    symbol TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    date_str TEXT NOT NULL,
+    open REAL NOT NULL,
+    high REAL NOT NULL,
+    low REAL NOT NULL,
+    close REAL NOT NULL,
+    volume INTEGER NOT NULL,
+    created_at REAL NOT NULL,
+    PRIMARY KEY (symbol, timestamp)
+);
+CREATE INDEX IF NOT EXISTS idx_candles_symbol_time ON daily_candles(symbol, timestamp DESC);
 """
 
 async def init_db(db_path: str = "storage/bot.db"):

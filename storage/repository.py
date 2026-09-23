@@ -51,3 +51,52 @@ class Repository:
             ) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(r) for r in rows]
+
+    async def save_candles(self, symbol: str, series):
+        if not series.candles:
+            return
+        import time
+        now = time.time()
+        async with aiosqlite.connect(self.db_path) as db:
+            values = [
+                (symbol.upper(), c.timestamp, c.date_str, c.open, c.high, c.low, c.close, c.volume, now)
+                for c in series.candles
+            ]
+            await db.executemany(
+                """
+                INSERT OR REPLACE INTO daily_candles
+                (symbol, timestamp, date_str, open, high, low, close, volume, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                values
+            )
+            await db.commit()
+
+    async def get_candles(self, symbol: str, limit: int = 150):
+        from market.models import Candle, OHLCVSeries
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """
+                SELECT timestamp, date_str, open, high, low, close, volume
+                FROM daily_candles
+                WHERE symbol = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (symbol.upper(), limit)
+            )
+            rows = await cursor.fetchall()
+            candles = [
+                Candle(
+                    timestamp=r["timestamp"],
+                    date_str=r["date_str"],
+                    open=r["open"],
+                    high=r["high"],
+                    low=r["low"],
+                    close=r["close"],
+                    volume=r["volume"]
+                )
+                for r in reversed(rows)
+            ]
+            return OHLCVSeries(symbol=symbol.upper(), resolution="1D", candles=candles)
