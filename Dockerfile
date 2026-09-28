@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Ensure storage and logs directories exist
-RUN mkdir -p storage logs
+# Ensure data and logs directories exist
+RUN mkdir -p data logs
 
 CMD ["python", "main.py"]

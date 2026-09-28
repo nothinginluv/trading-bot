@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = Field(..., description="Telegram Bot Token from BotFather")
     TELEGRAM_CHAT_ID: int = Field(..., description="Admin Telegram User ID for whitelist")
     DRY_RUN: bool = Field(False, description="Set True for offline mock testing")
-    DB_PATH: str = Field("storage/bot.db", description="Path to local SQLite DB")
+    DB_PATH: str = Field("data/bot.db", description="Path to local SQLite DB")
     LOG_LEVEL: str = Field("INFO", description="Logging level")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
