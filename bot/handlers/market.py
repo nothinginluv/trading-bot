@@ -11,6 +11,18 @@ def extract_symbol(text: str) -> str:
         return parts[1].upper()
     return ""
 
+def format_stock_price(price: float) -> str:
+    if price <= 0:
+        return f"{price:,.1f}"
+    if price < 1000:
+        return f"{price:,.1f} ({price * 1000:,.0f} đ)"
+    return f"{price:,.0f} đ"
+
+def format_stock_change(change: float) -> str:
+    if abs(change) < 500:
+        return f"{change:+.1f} ({change * 1000:+,.0f} đ)"
+    return f"{change:+,.0f} đ"
+
 @router.message(Command("quote", "q"))
 async def cmd_quote(message: Message, state_obj):
     sym = extract_symbol(message.text)
@@ -23,12 +35,18 @@ async def cmd_quote(message: Message, state_obj):
         return
 
     icon = "🟢" if s.change > 0 else ("🔴" if s.change < 0 else "⚪")
+    price_str = format_stock_price(s.price)
+    change_str = format_stock_change(s.change)
+    ohlc_str = f"`{s.open:,.1f}` / `{s.high:,.1f}` / `{s.low:,.1f}`"
+    if s.price < 1000:
+        ohlc_str += f" ({s.open*1000:,.0f} / {s.high*1000:,.0f} / {s.low*1000:,.0f} đ)"
+
     text = (
         f"{icon} **CỔ PHIẾU: {s.symbol} (Khung Ngày 1D)**\n"
         "──────────────────────\n"
-        f"• **Thị giá:** `{s.price:,.1f} đ` ({s.change_pct:+.2f}%)\n"
-        f"• **Biến động:** `{s.change:+.1f} đ`\n"
-        f"• **Mở / Cao / Thấp:** `{s.open:,.1f}` / `{s.high:,.1f}` / `{s.low:,.1f}`\n"
+        f"• **Thị giá:** `{price_str}` ({s.change_pct:+.2f}%)\n"
+        f"• **Biến động:** `{change_str}`\n"
+        f"• **Mở / Cao / Thấp:** {ohlc_str}\n"
         f"• **Khối lượng:** `{s.volume:,} CP`\n"
         f"• **Tỷ lệ Vol / TB20:** `{s.vol_ratio:.1f}x` (TB20: `{s.vol_sma20:,.0f}`)\n"
         f"• **Tín hiệu tổng quan:** `{s.composite_signal}`\n"
@@ -48,6 +66,7 @@ async def cmd_indicators(message: Message, state_obj):
         return
 
     trend_icon = "🟢" if s.trend == "UPTREND" else ("🔴" if s.trend == "DOWNTREND" else "🟡")
+    atr_str = f"`{s.atr14:.2f}` ({s.atr14*1000:,.0f} đ)" if s.atr14 < 1000 else f"`{s.atr14:.2f} đ`"
     text = (
         f"📊 **PHÂN TÍCH KỸ THUẬT: {s.symbol} (1D)**\n"
         "──────────────────────\n"
@@ -56,7 +75,7 @@ async def cmd_indicators(message: Message, state_obj):
         f"• **RSI (14):** `{s.rsi14:.1f}` ({s.rsi_status})\n"
         f"• **MACD (12, 26, 9):** `{s.macd:+.2f}` | Signal: `{s.macd_signal:+.2f}` | Hist: `{s.macd_hist:+.2f}` ({s.macd_status})\n"
         f"• **Bollinger Bands:** `{s.bb_lower:,.1f}` - `{s.bb_middle:,.1f}` - `{s.bb_upper:,.1f}`\n"
-        f"• **ATR (14):** `{s.atr14:.2f} đ`\n"
+        f"• **ATR (14):** {atr_str}\n"
         f"• **Khối lượng:** `{s.volume:,} CP` (`{s.vol_ratio:.1f}x` TB20)\n"
         "──────────────────────\n"
         f"🎯 **ĐÁNH GIÁ CHUNG:** `{s.composite_signal}`"
@@ -78,7 +97,7 @@ async def cmd_market(message: Message, state_obj):
     text = (
         f"🏛️ **THỊ TRƯỜNG CHUNG: VN-INDEX (1D)**\n"
         "──────────────────────\n"
-        f"• **Điểm số:** `{s.price:,.2f}` ({s.change_pct:+.2f}% | `{s.change:+.2f}` đ)\n"
+        f"• **Điểm số:** `{s.price:,.2f} điểm` ({s.change_pct:+.2f}% | `{s.change:+.2f}` điểm)\n"
         f"• **Trạng thái:** {regime_emoji} **{regime}**\n"
         f"• **Bộ lọc giải ngân:** {gate_status}\n"
         "──────────────────────\n"
@@ -115,7 +134,8 @@ async def cmd_scan(message: Message, state_obj):
     lines.append("🚀 **BÙNG NỔ KHỐI LƯỢNG & GIÁ (Breakout):**")
     if res.breakout:
         for s in res.breakout[:5]:
-            lines.append(f"• **{s.symbol}**: `{s.price:,.1f}` ({s.change_pct:+.2f}%) | Vol: `{s.vol_ratio:.1f}x` | RSI: `{s.rsi14:.1f}`")
+            p_str = format_stock_price(s.price)
+            lines.append(f"• **{s.symbol}**: `{p_str}` ({s.change_pct:+.2f}%) | Vol: `{s.vol_ratio:.1f}x` | RSI: `{s.rsi14:.1f}`")
     else:
         lines.append("• Hiện chưa có mã nào thỏa mãn điều kiện")
 
@@ -123,7 +143,8 @@ async def cmd_scan(message: Message, state_obj):
     lines.append("\n💎 **VÙNG QUÁ BÁN / TÍCH LŨY (Oversold):**")
     if res.oversold:
         for s in res.oversold[:5]:
-            lines.append(f"• **{s.symbol}**: `{s.price:,.1f}` ({s.change_pct:+.2f}%) | RSI: `{s.rsi14:.1f}`")
+            p_str = format_stock_price(s.price)
+            lines.append(f"• **{s.symbol}**: `{p_str}` ({s.change_pct:+.2f}%) | RSI: `{s.rsi14:.1f}`")
     else:
         lines.append("• Hiện không có mã nào RSI < 35")
 
@@ -131,7 +152,8 @@ async def cmd_scan(message: Message, state_obj):
     lines.append("\n⚠️ **VÙNG QUÁ MUA (Cảnh báo điều chỉnh):**")
     if res.overbought:
         for s in res.overbought[:5]:
-            lines.append(f"• **{s.symbol}**: `{s.price:,.1f}` ({s.change_pct:+.2f}%) | RSI: `{s.rsi14:.1f}`")
+            p_str = format_stock_price(s.price)
+            lines.append(f"• **{s.symbol}**: `{p_str}` ({s.change_pct:+.2f}%) | RSI: `{s.rsi14:.1f}`")
     else:
         lines.append("• Hiện không có mã nào RSI > 70")
 
@@ -150,11 +172,13 @@ async def cmd_vn30(message: Message, state_obj):
     
     lines.append("🟢 **Top 5 Tăng Mạnh Nhất:**")
     for s in gainers:
-        lines.append(f"• **{s.symbol}**: `{s.price:,.1f}` (`{s.change_pct:+.2f}%`) | Vol: `{s.volume:,}`")
+        p_str = format_stock_price(s.price)
+        lines.append(f"• **{s.symbol}**: `{p_str}` (`{s.change_pct:+.2f}%`) | Vol: `{s.volume:,}`")
 
     lines.append("\n🔴 **Top 5 Giảm Mạnh Nhất:**")
     for s in losers:
-        lines.append(f"• **{s.symbol}**: `{s.price:,.1f}` (`{s.change_pct:+.2f}%`) | Vol: `{s.volume:,}`")
+        p_str = format_stock_price(s.price)
+        lines.append(f"• **{s.symbol}**: `{p_str}` (`{s.change_pct:+.2f}%`) | Vol: `{s.volume:,}`")
 
     await message.answer("\n".join(lines), parse_mode="Markdown")
 

@@ -50,6 +50,23 @@ async def sync_market_data_job(market_client, state, repo, notifier=None, symbol
             vnindex_series = await market_client.get_candles("VNINDEX", count=150)
             if len(vnindex_series) > 0:
                 vnindex_summary = compute_technical_summary(vnindex_series)
+                # Fetch fresh intraday VNINDEX for realtime benchmark
+                try:
+                    vnindex_15m = await market_client.get_candles("VNINDEX", count=20, resolution="15")
+                    if len(vnindex_15m) > 0 and vnindex_summary:
+                        last_pt = vnindex_15m.candles[-1]
+                        last_1d = vnindex_series.candles[-1]
+                        if last_pt.timestamp > last_1d.timestamp:
+                            prev_close = last_1d.close
+                            cur_price = last_pt.close
+                            change = cur_price - prev_close
+                            change_pct = (change / prev_close) * 100.0 if prev_close else 0.0
+                            vnindex_summary.price = round(cur_price, 2)
+                            vnindex_summary.change = round(change, 2)
+                            vnindex_summary.change_pct = round(change_pct, 2)
+                except Exception as ex_intra:
+                    logger.debug(f"Could not fetch intraday VNINDEX: {ex_intra}")
+
                 if vnindex_summary:
                     prev_regime = state.market_regime
                     state.set_market_regime(vnindex_summary, vnindex_series)
@@ -79,30 +96,73 @@ async def sync_market_data_job(market_client, state, repo, notifier=None, symbol
                 summary = compute_technical_summary(series)
                 if summary:
                     summaries_dict[sym] = summary
-                    if notifier and MarketHours.is_trading_time():
-                        if summary.vol_ratio >= 2.0 and summary.change_pct >= 2.5:
-                            alert_msg = (
-                                f"🚀 **CẢNH BÁO ĐỘT BIẾN KHỐI LƯỢNG: {sym}**\n"
-                                f"• Thị giá: `{summary.price:,.0f} đ` (`{summary.change_pct:+.2f}%`)\n"
-                                f"• Khối lượng: `{summary.volume:,}` (Đạt `{summary.vol_ratio:.1f}x` TB20)\n"
-                                f"• RSI (14): `{summary.rsi14:.1f}` | MACD: `{summary.macd_status}`"
-                            )
-                            await notifier.send_alert("Tín Hiệu Đột Biến VN30", alert_msg, level="INFO")
 
-        state.set_market_data(candles_dict, summaries_dict, resolution="1D")
-
-        # 3. Fetch VN30 components (15m Intraday for precision timing triggers)
+        # 3. Fetch VN30 components (15m Intraday for precision timing triggers & realtime price update)
         try:
             candles_15m_dict = await market_client.get_all_vn30_candles(target_symbols, resolution="15")
             summaries_15m_dict = {}
-            for sym, series in candles_15m_dict.items():
-                if len(series) > 0:
-                    summary_15m = compute_technical_summary(series)
+            today_date_str = datetime.now(MarketHours.VN_TZ).strftime("%Y-%m-%d")
+
+            for sym, series_15m in candles_15m_dict.items():
+                if len(series_15m) > 0:
+                    summary_15m = compute_technical_summary(series_15m)
                     if summary_15m:
                         summaries_15m_dict[sym] = summary_15m
+
+                    # Patch 1D summary with live intraday price & session stats if 15m is newer than 1D
+                    if sym in summaries_dict and sym in candles_dict and len(candles_dict[sym]) > 0:
+                        series_1D = candles_dict[sym]
+                        latest_1D = series_1D.candles[-1]
+                        latest_15m = series_15m.candles[-1]
+
+                        if latest_15m.timestamp > latest_1D.timestamp:
+                            prev_close = latest_1D.close
+                            cur_price = latest_15m.close
+                            change = cur_price - prev_close
+                            change_pct = (change / prev_close) * 100.0 if prev_close else 0.0
+
+                            today_candles = [c for c in series_15m.candles if c.date_str.startswith(today_date_str)]
+                            if today_candles:
+                                today_vol = sum(c.volume for c in today_candles)
+                                today_high = max(c.high for c in today_candles)
+                                today_low = min(c.low for c in today_candles)
+                                today_open = today_candles[0].open
+                            else:
+                                today_vol = latest_15m.volume
+                                today_high = latest_15m.high
+                                today_low = latest_15m.low
+                                today_open = latest_15m.open
+
+                            s = summaries_dict[sym]
+                            s.price = cur_price
+                            s.open = today_open
+                            s.high = today_high
+                            s.low = today_low
+                            s.volume = today_vol
+                            s.change = round(change, 2)
+                            s.change_pct = round(change_pct, 2)
+                            if s.vol_sma20 > 0:
+                                s.vol_ratio = round(today_vol / s.vol_sma20, 2)
+
             state.set_market_data(candles_15m_dict, summaries_15m_dict, resolution="15")
         except Exception as e:
             logger.warning(f"Could not sync 15m candles: {e}")
+
+        # Update 1D market data with live patched summaries
+        state.set_market_data(candles_dict, summaries_dict, resolution="1D")
+
+        # Volume spike alerts with live data
+        if notifier and MarketHours.is_trading_time():
+            for sym, summary in summaries_dict.items():
+                if summary.vol_ratio >= 2.0 and summary.change_pct >= 2.5:
+                    price_str = f"{summary.price:,.1f} ({summary.price*1000:,.0f} đ)" if summary.price < 1000 else f"{summary.price:,.0f} đ"
+                    alert_msg = (
+                        f"🚀 **CẢNH BÁO ĐỘT BIẾN KHỐI LƯỢNG: {sym}**\n"
+                        f"• Thị giá: `{price_str}` (`{summary.change_pct:+.2f}%`)\n"
+                        f"• Khối lượng: `{summary.volume:,}` (Đạt `{summary.vol_ratio:.1f}x` TB20)\n"
+                        f"• RSI (14): `{summary.rsi14:.1f}` | MACD: `{summary.macd_status}`"
+                    )
+                    await notifier.send_alert("Tín Hiệu Đột Biến VN30", alert_msg, level="INFO")
 
         # 4. Update NAV Tracking for Circuit Breaker
         if auto_trader and hasattr(auto_trader, "engine"):
