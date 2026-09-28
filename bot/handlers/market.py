@@ -1,7 +1,8 @@
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 from indicators.scanner import scan_vn30_market
+from bot.keyboards import get_vn30_inline_keyboard, get_quote_inline_keyboard
 
 router = Router()
 
@@ -23,6 +24,26 @@ def format_stock_change(change: float) -> str:
         return f"{change:+.1f} ({change * 1000:+,.0f} đ)"
     return f"{change:+,.0f} đ"
 
+def render_quote_text(s) -> str:
+    icon = "🟢" if s.change > 0 else ("🔴" if s.change < 0 else "⚪")
+    price_str = format_stock_price(s.price)
+    change_str = format_stock_change(s.change)
+    ohlc_str = f"`{s.open:,.1f}` / `{s.high:,.1f}` / `{s.low:,.1f}`"
+    if s.price < 1000:
+        ohlc_str += f" ({s.open*1000:,.0f} / {s.high*1000:,.0f} / {s.low*1000:,.0f} đ)"
+
+    return (
+        f"{icon} **CỔ PHIẾU: {s.symbol} (Khung Ngày 1D)**\n"
+        "──────────────────────\n"
+        f"• **Thị giá:** `{price_str}` ({s.change_pct:+.2f}%)\n"
+        f"• **Biến động:** `{change_str}`\n"
+        f"• **Mở / Cao / Thấp:** {ohlc_str}\n"
+        f"• **Khối lượng:** `{s.volume:,} CP`\n"
+        f"• **Tỷ lệ Vol / TB20:** `{s.vol_ratio:.1f}x` (TB20: `{s.vol_sma20:,.0f}`)\n"
+        f"• **Tín hiệu tổng quan:** `{s.composite_signal}`\n"
+        f"• Tra cứu kỹ thuật: `/indicators {s.symbol}`"
+    )
+
 @router.message(Command("quote", "q"))
 async def cmd_quote(message: Message, state_obj):
     sym = extract_symbol(message.text)
@@ -34,25 +55,9 @@ async def cmd_quote(message: Message, state_obj):
         await message.answer(f"⚠️ Chưa có dữ liệu cho mã `{sym}` trong rổ VN30. Vui lòng thử lại sau.", parse_mode="Markdown")
         return
 
-    icon = "🟢" if s.change > 0 else ("🔴" if s.change < 0 else "⚪")
-    price_str = format_stock_price(s.price)
-    change_str = format_stock_change(s.change)
-    ohlc_str = f"`{s.open:,.1f}` / `{s.high:,.1f}` / `{s.low:,.1f}`"
-    if s.price < 1000:
-        ohlc_str += f" ({s.open*1000:,.0f} / {s.high*1000:,.0f} / {s.low*1000:,.0f} đ)"
-
-    text = (
-        f"{icon} **CỔ PHIẾU: {s.symbol} (Khung Ngày 1D)**\n"
-        "──────────────────────\n"
-        f"• **Thị giá:** `{price_str}` ({s.change_pct:+.2f}%)\n"
-        f"• **Biến động:** `{change_str}`\n"
-        f"• **Mở / Cao / Thấp:** {ohlc_str}\n"
-        f"• **Khối lượng:** `{s.volume:,} CP`\n"
-        f"• **Tỷ lệ Vol / TB20:** `{s.vol_ratio:.1f}x` (TB20: `{s.vol_sma20:,.0f}`)\n"
-        f"• **Tín hiệu tổng quan:** `{s.composite_signal}`\n"
-        f"• Tra cứu kỹ thuật: `/indicators {s.symbol}`"
-    )
-    await message.answer(text, parse_mode="Markdown")
+    text = render_quote_text(s)
+    kb = get_quote_inline_keyboard(s.symbol)
+    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
 @router.message(Command("indicators", "i"))
 async def cmd_indicators(message: Message, state_obj):
@@ -160,6 +165,44 @@ async def cmd_scan(message: Message, state_obj):
     lines.append("\n💡 Gõ `/indicators <MÃ>` để xem chi tiết từng mã.")
     await message.answer("\n".join(lines), parse_mode="Markdown")
 
+def format_vol(v: int) -> str:
+    if v >= 1_000_000:
+        return f"{v / 1_000_000:.1f}M"
+    if v >= 1_000:
+        return f"{v / 1_000:.0f}K"
+    return str(v)
+
+def render_vn30_board_text(state_obj, active_view: str = "gainers") -> str:
+    gainers, losers = state_obj.get_top_movers(limit=8)
+    items = gainers if active_view == "gainers" else losers
+    title_view = "TOP 8 TĂNG GIÁ" if active_view == "gainers" else "TOP 8 GIẢM GIÁ"
+    icon = "🟢" if active_view == "gainers" else "🔴"
+    
+    vn_idx = state_obj.vnindex_summary
+    idx_str = f"{vn_idx.price:,.2f} ({vn_idx.change_pct:+.2f}%)" if vn_idx else "N/A"
+    regime = state_obj.market_regime
+    regime_emoji = "🟢" if regime == "BULLISH" else ("🔴" if regime == "BEARISH" else "🟡")
+
+    header = (
+        f"📈 **BẢNG GIÁ VN30: {icon} {title_view}**\n"
+        f"• **VN-Index:** `{idx_str}` | {regime_emoji} `{regime}`\n"
+        "```text\n"
+        f"{'MÃ':<5} {'GIÁ':>6} {'+/-':>6} {'%':>7} {'VOL':>6}\n"
+        f"{'─'*34}\n"
+    )
+    rows = []
+    for s in items:
+        vol_str = format_vol(s.volume)
+        row = f"{s.symbol:<5} {s.price:>6.1f} {s.change:>+6.1f} {s.change_pct:>+6.2f}% {vol_str:>6}"
+        rows.append(row)
+    
+    body = "\n".join(rows) if rows else "Chưa có dữ liệu"
+    footer = (
+        "\n```\n"
+        "💡 *Bấm nút bên dưới để đổi Top Tăng/Giảm hoặc cập nhật giá.*"
+    )
+    return header + body + footer
+
 @router.message(Command("vn30"))
 @router.message(lambda msg: msg.text == "📈 Bảng giá VN30")
 async def cmd_vn30(message: Message, state_obj):
@@ -167,20 +210,89 @@ async def cmd_vn30(message: Message, state_obj):
         await message.answer("⚠️ Đang đồng bộ bảng giá VN30, vui lòng thử lại sau giây lát.")
         return
 
-    gainers, losers = state_obj.get_top_movers(limit=5)
-    lines = ["📈 **BẢNG GIÁ VN30: TOP BIẾN ĐỘNG**\n──────────────────────"]
-    
-    lines.append("🟢 **Top 5 Tăng Mạnh Nhất:**")
-    for s in gainers:
-        p_str = format_stock_price(s.price)
-        lines.append(f"• **{s.symbol}**: `{p_str}` (`{s.change_pct:+.2f}%`) | Vol: `{s.volume:,}`")
+    text = render_vn30_board_text(state_obj, active_view="gainers")
+    kb = get_vn30_inline_keyboard(active_view="gainers")
+    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
-    lines.append("\n🔴 **Top 5 Giảm Mạnh Nhất:**")
-    for s in losers:
-        p_str = format_stock_price(s.price)
-        lines.append(f"• **{s.symbol}**: `{p_str}` (`{s.change_pct:+.2f}%`) | Vol: `{s.volume:,}`")
+@router.callback_query(lambda c: c.data and c.data.startswith("vn30_view:"))
+async def cb_vn30_view(query: CallbackQuery, state_obj):
+    view = query.data.split(":")[1]
+    text = render_vn30_board_text(state_obj, active_view=view)
+    kb = get_vn30_inline_keyboard(active_view=view)
+    try:
+        if query.message:
+            await query.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    except Exception:
+        pass
+    await query.answer()
 
-    await message.answer("\n".join(lines), parse_mode="Markdown")
+@router.callback_query(lambda c: c.data and c.data.startswith("vn30_refresh:"))
+async def cb_vn30_refresh(query: CallbackQuery, state_obj):
+    view = query.data.split(":")[1]
+    text = render_vn30_board_text(state_obj, active_view=view)
+    kb = get_vn30_inline_keyboard(active_view=view)
+    try:
+        if query.message:
+            await query.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    except Exception:
+        pass
+    await query.answer("✅ Đã cập nhật bảng giá VN30 mới nhất!")
+
+@router.callback_query(lambda c: c.data and c.data.startswith("q_refresh:"))
+async def cb_quote_refresh(query: CallbackQuery, state_obj):
+    symbol = query.data.split(":")[1]
+    s = state_obj.get_summary(symbol)
+    if not s:
+        await query.answer(f"⚠️ Chưa có dữ liệu mới cho {symbol}", show_alert=True)
+        return
+    text = render_quote_text(s)
+    kb = get_quote_inline_keyboard(symbol)
+    try:
+        if query.message:
+            await query.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    except Exception:
+        pass
+    await query.answer(f"✅ Đã cập nhật giá {symbol}!")
+
+@router.callback_query(lambda c: c.data and c.data.startswith("q_ind:"))
+async def cb_quote_ind(query: CallbackQuery, state_obj):
+    symbol = query.data.split(":")[1]
+    s = state_obj.get_summary(symbol)
+    if not s:
+        await query.answer(f"⚠️ Chưa có dữ liệu kỹ thuật cho {symbol}", show_alert=True)
+        return
+    trend_icon = "🟢" if s.trend == "UPTREND" else ("🔴" if s.trend == "DOWNTREND" else "🟡")
+    atr_str = f"`{s.atr14:.2f}` ({s.atr14*1000:,.0f} đ)" if s.atr14 < 1000 else f"`{s.atr14:.2f} đ`"
+    text = (
+        f"📊 **PHÂN TÍCH KỸ THUẬT: {s.symbol} (1D)**\n"
+        "──────────────────────\n"
+        f"• **Xu hướng chính:** {trend_icon} `{s.trend}`\n"
+        f"• **Đường EMA:** 9: `{s.ema9:,.1f}` | 21: `{s.ema21:,.1f}` | 50: `{s.ema50:,.1f}`\n"
+        f"• **RSI (14):** `{s.rsi14:.1f}` ({s.rsi_status})\n"
+        f"• **MACD (12, 26, 9):** `{s.macd:+.2f}` | Signal: `{s.macd_signal:+.2f}` | Hist: `{s.macd_hist:+.2f}` ({s.macd_status})\n"
+        f"• **Bollinger Bands:** `{s.bb_lower:,.1f}` - `{s.bb_middle:,.1f}` - `{s.bb_upper:,.1f}`\n"
+        f"• **ATR (14):** {atr_str}\n"
+        f"• **Khối lượng:** `{s.volume:,} CP` (`{s.vol_ratio:.1f}x` TB20)\n"
+        "──────────────────────\n"
+        f"🎯 **ĐÁNH GIÁ CHUNG:** `{s.composite_signal}`"
+    )
+    if query.message:
+        await query.message.answer(text, parse_mode="Markdown")
+    await query.answer()
+
+@router.callback_query(lambda c: c.data and c.data.startswith("q_news:"))
+async def cb_quote_news(query: CallbackQuery, state_obj):
+    symbol = query.data.split(":")[1].upper()
+    articles = [a for a in getattr(state_obj, "latest_news", []) if symbol in getattr(a, "related_symbols", [])]
+    if not articles:
+        await query.answer(f"ℹ️ Không có tin tức mới về {symbol}", show_alert=True)
+        return
+    lines = [f"📰 **TIN TỨC MỚI NHẤT VỀ {symbol}:**\n──────────────────────"]
+    for a in articles[:4]:
+        lines.append(f"• [{a.title}]({a.link}) ({a.source})")
+    if query.message:
+        await query.message.answer("\n".join(lines), parse_mode="Markdown", disable_web_page_preview=True)
+    await query.answer()
 
 @router.message(Command("sectors", "nganh"))
 async def cmd_sectors(

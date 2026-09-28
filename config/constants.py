@@ -1,7 +1,7 @@
 VN30_SYMBOLS = [
-    "ACB", "BCM", "BID", "BVH", "CTG", "FPT", "GAS", "GVR", "HDB", "HPG",
-    "MBB", "MSN", "MWG", "PLX", "POW", "SAB", "SHB", "SSB", "SSI", "STB",
-    "TCB", "TPB", "VCB", "VHM", "VIB", "VIC", "VJC", "VNM", "VPB", "VRE"
+    "ACB", "BID", "BSR", "CTG", "FPT", "GAS", "GVR", "HDB", "HPG", "LPB",
+    "MBB", "MCH", "MSN", "MWG", "POW", "SAB", "SHB", "SSB", "STB", "TCB",
+    "TCX", "VCB", "VHM", "VIB", "VIC", "VJC", "VNM", "VPB", "VPL", "VRE"
 ]
 
 HOSE_HOURS = {
@@ -16,22 +16,21 @@ HOSE_HOURS = {
 DNSE_BASE_URL = "https://openapi.dnse.com.vn"
 
 VN30_SECTOR_MAP = {
-    # Ngân hàng (Banking) - 13 mã chính
+    # Ngân hàng (Banking)
     "ACB": "NGÂN HÀNG",
     "BID": "NGÂN HÀNG",
     "CTG": "NGÂN HÀNG",
     "HDB": "NGÂN HÀNG",
+    "LPB": "NGÂN HÀNG",
     "MBB": "NGÂN HÀNG",
     "SHB": "NGÂN HÀNG",
     "SSB": "NGÂN HÀNG",
     "STB": "NGÂN HÀNG",
     "TCB": "NGÂN HÀNG",
-    "TPB": "NGÂN HÀNG",
     "VCB": "NGÂN HÀNG",
     "VIB": "NGÂN HÀNG",
     "VPB": "NGÂN HÀNG",
     # Bất động sản (Real Estate)
-    "BCM": "BẤT ĐỘNG SẢN",
     "VHM": "BẤT ĐỘNG SẢN",
     "VIC": "BẤT ĐỘNG SẢN",
     "VRE": "BẤT ĐỘNG SẢN",
@@ -39,7 +38,6 @@ VN30_SECTOR_MAP = {
     "HPG": "THÉP & VẬT LIỆU",
     # Bán lẻ & Tiêu dùng (Retail & Consumer)
     "MWG": "BÁN LẺ",
-    "PNJ": "BÁN LẺ",
     # Công nghệ thông tin (Technology)
     "FPT": "CÔNG NGHỆ",
     # Thực phẩm & Đồ uống (Food & Beverage)
@@ -53,14 +51,14 @@ VN30_SECTOR_MAP = {
     "BSR": "DẦU KHÍ & XĂNG DẦU",
     # Điện & Tiện ích (Power & Utilities)
     "POW": "ĐIỆN & TIỆN ÍCH",
-    # Chứng khoán (Financial Services / Brokerage)
-    "SSI": "CHỨNG KHOÁN",
-    # Bảo hiểm (Insurance)
-    "BVH": "BẢO HIỂM",
-    # Hàng không & Vận tải (Aviation & Transport)
+    # Chứng khoán (TCBS)
+    "TCX": "CHỨNG KHOÁN (TCBS)",
+    # Hàng không (Aviation)
     "VJC": "HÀNG KHÔNG",
     # Cao su & Vật liệu (Rubber & Industrial Materials)
     "GVR": "CAO SU & VẬT LIỆU",
+    # Du lịch & Dịch vụ (Vinpearl)
+    "VPL": "DỊCH VỤ & NGHỈ DƯỠNG",
 }
 
 def get_symbol_sector(symbol: str) -> str:

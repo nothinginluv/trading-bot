@@ -1,12 +1,39 @@
 import logging
 import time
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
+from bot.keyboards import get_positions_inline_keyboard
 
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+def render_positions_board(state_obj) -> str:
+    if not state_obj.positions:
+        return "📊 **DANH MỤC VỊ THẾ**\n──────────────────────\nHiện tại tài khoản chưa mở vị thế cổ phiếu nào."
+
+    header = (
+        f"📊 **DANH MỤC VỊ THẾ ({len(state_obj.positions)}/4 mã)**\n"
+        "```text\n"
+        f"{'MÃ':<5} {'KL':>6} {'GIÁ VỐN':>8} {'THỊ GIÁ':>8} {'+/- (%)':>8}\n"
+        f"{'─'*38}\n"
+    )
+    rows = []
+    total_pnl = 0.0
+    for p in state_obj.positions:
+        row = f"{p.symbol:<5} {p.tradeQuantity:>6,} {p.costPrice:>8,.0f} {p.marketPrice:>8,.0f} {p.pnlPercent:>+7.2f}%"
+        rows.append(row)
+        total_pnl += p.unrealizedPnl
+
+    pnl_sign = "+" if total_pnl >= 0 else ""
+    footer = (
+        f"\n{'─'*38}\n"
+        f"TỔNG LÃI/LỖ TẠM TÍNH: {pnl_sign}{total_pnl:,.0f} đ\n"
+        "```\n"
+        "💡 *Bấm nút bên dưới để làm mới hoặc xem phân tích hiệu suất.*"
+    )
+    return header + "\n".join(rows) + footer
 
 @router.message(Command("balance"))
 @router.message(lambda msg: msg.text == "💰 Số dư")
@@ -45,23 +72,37 @@ async def cmd_positions(message: Message, state_obj, client):
         pos = await client.get_positions(sub_id)
         state_obj.set_positions(pos)
 
-    if not state_obj.positions:
-        await message.answer("📊 **DANH MỤC VỊ THẾ**\n──────────────────────\nHiện tại tài khoản chưa mở vị thế cổ phiếu nào.")
-        return
+    text = render_positions_board(state_obj)
+    kb = get_positions_inline_keyboard() if state_obj.positions else None
+    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
-    lines = [f"📊 **DANH MỤC VỊ THẾ ({len(state_obj.positions)}/4 mã)**\n──────────────────────"]
-    total_pnl = 0.0
-    for p in state_obj.positions:
-        icon = "🟢" if p.unrealizedPnl > 0 else ("🔴" if p.unrealizedPnl < 0 else "⚪")
-        lines.append(
-            f"{icon} **{p.symbol}**: {p.tradeQuantity:,} CP\n"
-            f"   • Giá vốn: `{p.costPrice:,.0f}` | Thị giá: `{p.marketPrice:,.0f}`\n"
-            f"   • Lãi/Lỗ: `{p.unrealizedPnl:+,.0f} đ` ({p.pnlPercent:+.2f}%)"
-        )
-        total_pnl += p.unrealizedPnl
-    lines.append("──────────────────────")
-    lines.append(f"**Tổng lãi/lỗ tạm tính:** `{total_pnl:+,.0f} đ`")
-    await message.answer("\n".join(lines), parse_mode="Markdown")
+@router.callback_query(lambda c: c.data == "pos_refresh")
+async def cb_pos_refresh(query: CallbackQuery, state_obj, client):
+    if client and state_obj.account:
+        try:
+            sub_id = state_obj.account.accounts[0].id
+            pos = await client.get_positions(sub_id)
+            state_obj.set_positions(pos)
+        except Exception:
+            pass
+    text = render_positions_board(state_obj)
+    kb = get_positions_inline_keyboard() if state_obj.positions else None
+    try:
+        if query.message:
+            await query.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    except Exception:
+        pass
+    await query.answer("✅ Đã làm mới danh mục vị thế!")
+
+@router.callback_query(lambda c: c.data == "pos_pnl")
+async def cb_pos_pnl(query: CallbackQuery, state_obj, repo):
+    try:
+        from bot.handlers.portfolio import cmd_performance
+        if query.message:
+            await cmd_performance(query.message, repo, state_obj)
+    except Exception:
+        pass
+    await query.answer()
 
 @router.message(Command("sync"))
 @router.message(lambda msg: msg.text == "🔄 Làm mới")
