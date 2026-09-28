@@ -1,7 +1,7 @@
 VN30_SYMBOLS = [
-    "ACB", "BID", "BSR", "BVH", "CTG", "FPT", "GAS", "GVR", "HDB", "HPG",
-    "MBB", "MCH", "MSN", "MWG", "POW", "SAB", "SSB", "SSI", "STB", "TCB",
-    "TCX", "VCB", "VHM", "VIB", "VIC", "VJC", "VNM", "VPB", "VPL", "VRE"
+    "ACB", "BCM", "BID", "BVH", "CTG", "FPT", "GAS", "GVR", "HDB", "HPG",
+    "MBB", "MSN", "MWG", "PLX", "POW", "SAB", "SHB", "SSB", "SSI", "STB",
+    "TCB", "TPB", "VCB", "VHM", "VIB", "VIC", "VJC", "VNM", "VPB", "VRE"
 ]
 
 HOSE_HOURS = {
@@ -30,7 +30,6 @@ VN30_SECTOR_MAP = {
     "VCB": "NGÂN HÀNG",
     "VIB": "NGÂN HÀNG",
     "VPB": "NGÂN HÀNG",
-    "TCX": "NGÂN HÀNG",
     # Bất động sản (Real Estate)
     "BCM": "BẤT ĐỘNG SẢN",
     "VHM": "BẤT ĐỘNG SẢN",
@@ -62,8 +61,6 @@ VN30_SECTOR_MAP = {
     "VJC": "HÀNG KHÔNG",
     # Cao su & Vật liệu (Rubber & Industrial Materials)
     "GVR": "CAO SU & VẬT LIỆU",
-    # Dịch vụ & Khác
-    "VPL": "DỊCH VỤ",
 }
 
 def get_symbol_sector(symbol: str) -> str:
