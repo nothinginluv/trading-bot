@@ -1,0 +1,15 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.superpowers/
+.git/
+.gitignore
+.env
+API.txt
+*.db
+storage/*.db
+logs/*.log

@@ -58,12 +58,31 @@ class SettlementTranche(BaseModel):
     is_settled: bool = False
     created_at: datetime = Field(default_factory=datetime.now)
 
+class ExitType(str, Enum):
+    STOP_LOSS = "STOP_LOSS"
+    TAKE_PROFIT_1 = "TAKE_PROFIT_1"
+    TAKE_PROFIT_2 = "TAKE_PROFIT_2"
+    TRAILING_STOP = "TRAILING_STOP"
+    BREAKEVEN = "BREAKEVEN"
+
+class ExitDecision(BaseModel):
+    should_exit: bool = False
+    exit_type: Optional[ExitType] = None
+    sell_ratio: float = 1.0
+    reason: str = ""
+    is_tp1: bool = False
+
+    def __iter__(self):
+        yield self.should_exit
+        yield self.reason
+
 class PaperPosition(BaseModel):
     symbol: str
     total_quantity: int = 0
     available_quantity: int = 0
     avg_buy_price: float = 0.0
     highest_price: float = 0.0
+    tp1_taken: bool = False
     current_price: float = 0.0
     unrealized_pnl: float = 0.0
     unrealized_pnl_pct: float = 0.0

@@ -72,3 +72,20 @@ async def test_vn30_command():
     assert msg.answer.called
     reply_text = msg.answer.call_args[0][0]
     assert "BẢNG GIÁ VN30" in reply_text
+
+@pytest.mark.asyncio
+async def test_market_command():
+    from bot.handlers.market import cmd_market
+    state = TradingState()
+    state.set_market_regime(make_test_summary("VNINDEX", price=1285.5))
+
+    msg = MagicMock(spec=Message)
+    msg.text = "/market"
+    msg.answer = AsyncMock()
+
+    await cmd_market(msg, state)
+    assert msg.answer.called
+    reply_text = msg.answer.call_args[0][0]
+    assert "VN-INDEX" in reply_text
+    assert "1,285.50" in reply_text
+    assert "CHO PHÉP" in reply_text

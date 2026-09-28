@@ -1,9 +1,11 @@
+from typing import Optional
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from strategy.paper_engine import PaperEngine
 from storage.repository import PaperTradingRepository
 from core.state import TradingState
+from core.risk_safeguards import RiskSafeguards
 from strategy.models import OrderStatus, SignalType
 from strategy.signals import scan_signals
 
@@ -26,6 +28,13 @@ async def cmd_paper(message: Message, paper_engine: PaperEngine, paper_repo: Pap
         mkt_price = current_prices.get(pos.symbol, pos.avg_buy_price)
         total_unrealized_pnl += (mkt_price - pos.avg_buy_price) * pos.total_quantity
 
+    active_positions = [p for p in positions if p.total_quantity > 0]
+    exposure_pct = (account.stock_value / account.nav * 100) if account.nav > 0 else 0.0
+    cb_line = ""
+    if state_obj.nav_day_start and state_obj.nav_day_start > 0:
+        dd_day = ((account.nav - state_obj.nav_day_start) / state_obj.nav_day_start) * 100
+        cb_line = f"• **Drawdown ngày:** `{dd_day:+.2f}%` (Cầu dao: `-3.0%`)\n"
+
     text = (
         "💼 **TÀI KHOẢN GIẢ LẬP (PAPER TRADING)**\n"
         "──────────────────────\n"
@@ -33,6 +42,9 @@ async def cmd_paper(message: Message, paper_engine: PaperEngine, paper_repo: Pap
         f"• **Tiền mặt khả dụng:** `{account.cash_balance:,.0f} đ`\n"
         f"• **Giá trị cổ phiếu:** `{account.stock_value:,.0f} đ`\n"
         f"• **Tổng tài sản (NAV):** `{account.nav:,.0f} đ`\n"
+        f"• **Phơi nhiễm danh mục:** `{exposure_pct:.1f}% NAV` (Trần: 85%)\n"
+        f"• **Quy mô danh mục:** `{len(active_positions)}/4 mã`\n"
+        f"{cb_line}"
         f"• **Lãi/Lỗ đã chốt:** `{account.total_realized_pnl:+,.0f} đ`\n"
         f"• **Lãi/Lỗ tạm tính:** `{total_unrealized_pnl:+,.0f} đ`\n"
         f"• **Chế độ Auto-Trade:** {auto_status}\n\n"
@@ -76,7 +88,9 @@ async def cmd_signals(message: Message, state_obj: TradingState):
         series = state_obj.vn30_candles.get(sym)
         if not series:
             continue
-        sig = scan_signals(series, summary)
+        series_15m = state_obj.get_candles(sym, resolution="15")
+        summary_15m = state_obj.get_summary(sym, resolution="15")
+        sig = scan_signals(series, summary, series_15m=series_15m, summary_15m=summary_15m)
         if sig:
             found_signals.append((sig, summary))
 
@@ -96,7 +110,13 @@ async def cmd_signals(message: Message, state_obj: TradingState):
     await message.answer(text, parse_mode="Markdown")
 
 @router.message(Command("buy_paper"))
-async def cmd_buy_paper(message: Message, paper_engine: PaperEngine, state_obj: TradingState):
+async def cmd_buy_paper(
+    message: Message,
+    paper_engine: PaperEngine,
+    state_obj: TradingState,
+    paper_repo: Optional[PaperTradingRepository] = None,
+    safeguards: Optional[RiskSafeguards] = None
+):
     parts = message.text.strip().split()
     if len(parts) < 3:
         await message.answer(
@@ -128,14 +148,29 @@ async def cmd_buy_paper(message: Message, paper_engine: PaperEngine, state_obj: 
             return
         price = summary.price
 
+    # Sector concentration risk validation
+    if safeguards:
+        repo = paper_repo or getattr(paper_engine, "repo", None)
+        if repo:
+            positions = await repo.get_positions()
+            active_symbols = [p.symbol for p in positions if p.total_quantity > 0]
+            valid_sec, sec_msg = safeguards.validate_sector_concentration(symbol, active_symbols)
+            if not valid_sec:
+                await message.answer(
+                    f"🛑 **LỆNH BỊ TỪ CHỐI BỞI QUẢN TRỊ RỦI RO NGÀNH:**\n{sec_msg}",
+                    parse_mode="Markdown"
+                )
+                return
+
     order = await paper_engine.execute_buy(symbol, quantity, price)
     if order.status == OrderStatus.FILLED:
         lot_type = "Lô chẵn" if quantity >= 100 else "Lô lẻ"
+        slip_note = f" (Đặt: `{price:,.0f} đ`, trượt: `+{order.price - price:,.0f} đ`)" if order.price != price else ""
         await message.answer(
             f"✅ **KHỚP LỆNH MUA GIẢ LẬP THÀNH CÔNG**\n"
             f"• Mã: `{symbol}` ({lot_type})\n"
             f"• Khối lượng: `{quantity:,}` cp\n"
-            f"• Giá khớp: `{price:,.0f} đ`\n"
+            f"• Giá khớp: `{order.price:,.0f} đ`{slip_note}\n"
             f"• Phí giao dịch (0.15%): `{order.fee:,.0f} đ`\n"
             f"• Chu kỳ thanh toán: Ngày T+2 cổ phiếu mới về để bán.",
             parse_mode="Markdown"
@@ -182,11 +217,12 @@ async def cmd_sell_paper(message: Message, paper_engine: PaperEngine, state_obj:
 
     order = await paper_engine.execute_sell(symbol, quantity, price)
     if order.status == OrderStatus.FILLED:
+        slip_note = f" (Đặt: `{price:,.0f} đ`, trượt: `-{price - order.price:,.0f} đ`)" if order.price != price else ""
         await message.answer(
             f"✅ **KHỚP LỆNH BÁN GIẢ LẬP THÀNH CÔNG**\n"
             f"• Mã: `{symbol}`\n"
             f"• Khối lượng bán: `{quantity:,}` cp\n"
-            f"• Giá khớp: `{price:,.0f} đ`\n"
+            f"• Giá khớp: `{order.price:,.0f} đ`{slip_note}\n"
             f"• Phí (0.15%): `{order.fee:,.0f} đ` | Thuế (0.10%): `{order.tax:,.0f} đ`\n"
             f"• Tiền đã cộng vào tài khoản giả lập!",
             parse_mode="Markdown"

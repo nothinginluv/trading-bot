@@ -1,0 +1,279 @@
+================================================================================
+          HỆ THỐNG BOT GIAO DỊCH CHỨNG KHOÁN TỰ ĐỘNG VN30 (AI AUTO TRADING BOT)
+                           TỔNG HỢP TOÀN BỘ TÍNH NĂNG HIỆN CÓ
+================================================================================
+Ngày cập nhật: 24/09/2026
+Môi trường: Windows / Python 3.12 / SQLite / DNSE OpenAPI / Telegram Bot
+Bảo mật Whitelist: Duy nhất Admin Chat ID [7385637982] có quyền điều khiển.
+
+--------------------------------------------------------------------------------
+1. KẾT NỐI TÀI KHOẢN & BẢO MẬT HỆ THỐNG
+--------------------------------------------------------------------------------
+- Xác thực chuẩn DNSE OpenAPI:
+  + Ký số HMAC-SHA256 tự động cho mọi request nhạy cảm.
+  + Tự động gia hạn và quản lý phiên đăng nhập qua API Key & API Secret.
+- Phân quyền Whitelist tuyệt đối:
+  + Chặn 100% truy cập từ người lạ. Chỉ tài khoản Telegram của Admin mới có thể
+    xem thông tin và ra lệnh.
+- Cơ chế Cơ sở Dữ liệu Đa Luồng Không Khóa (SQLite WAL Mode):
+  + Tự động kích hoạt `PRAGMA journal_mode=WAL;`, `PRAGMA busy_timeout=10000;`,
+    `PRAGMA synchronous=NORMAL;` trên mọi kết nối.
+  + Đảm bảo chạy song song trơn tru giữa quét nến 15m/1D, cào tin tức HTTPX,
+    và nhận lệnh Telegram mà không bao giờ bị lỗi `database is locked`.
+- 3 Chế độ Giao dịch Linh hoạt:
+  + [PAPER] (Mặc định): Chế độ mô phỏng an toàn tuyệt đối 100%, không sử dụng tiền thật.
+  + [LIVE_CONFIRM]: Chế độ Bán tự động (Semi-Auto). Khi có cơ hội giao dịch, bot gửi
+    thông báo kèm nút bấm [Xác nhận] và [Hủy bỏ]. Admin bấm duyệt lệnh mới được đẩy lên HOSE.
+  + [LIVE_AUTO]: Chế độ Tự động hoàn toàn (Full-Auto). Bot tự đặt lệnh thật khi tín hiệu hội tụ.
+- Cầu dao khẩn cấp (Emergency Kill Switch):
+  + Tức thì hủy toàn bộ lệnh đang chờ khớp trên sàn HOSE.
+  + Khóa chặt bot về trạng thái chỉ đọc (READ_ONLY), chặn đứng mọi hành vi đặt lệnh mới.
+- Tự Động Hủy Lệnh Treo Quá Hạn (Auto-Cancel Stale LO Orders):
+  + Đối với lệnh Mua/Bán LO gửi lên DNSE (qua /buy_live, /sell_live hoặc Auto-Trader):
+    Nếu sau 15 phút lệnh chưa khớp do thị giá đã chạy xa, bot tự động kích hoạt `cancel_order`
+    để giải phóng hạn mức phơi nhiễm danh mục, tránh bị khớp bất lợi vào cuối phiên khi xu hướng đảo chiều.
+- Hàng rào quản trị rủi ro đặt lệnh:
+  + Giới hạn số lệnh trong ngày: Tối đa 5 lệnh/ngày để tránh over-trading.
+  + Kiểm soát biên độ trần/sàn HOSE: Chặn đặt giá lệch quá biên độ +/- 7% so với giá tham chiếu.
+
+
+--------------------------------------------------------------------------------
+2. DỮ LIỆU ĐA KHUNG THỜI GIAN & CHỈ BÁO KỸ THUẬT (MULTI-TIMEFRAME DATA FEED)
+--------------------------------------------------------------------------------
+- Nguồn dữ liệu thời gian thực từ Entrade / DNSE Chart API (không cần login):
+  + Khung Ngày (1D): 150 nến ngày xác định xu hướng lớn và mức kháng cự/hỗ trợ chủ đạo.
+  + Khung 15 Phút (15m): Thu thập nến 15 phút độ trễ thấp bắt nhịp đảo chiều & bùng nổ điểm vào.
+- Cập nhật rổ VN30 chuẩn 30 cổ phiếu đầu ngành sàn HOSE:
+  ACB, BCM, BID, BVH, CTG, FPT, GAS, GVR, HDB, HPG, MBB, MSN, MWG, PLX, PNJ,
+  POW, SAB, SHB, SSB, SSI, STB, TCB, TPB, VCB, VHM, VIB, VIC, VJC, VNM, VPB.
+- Bộ tính toán chỉ báo kỹ thuật Vectorized (NumPy) hiệu năng cao trên cả 1D và 15m:
+  + Đường xu hướng: EMA 9, EMA 21, EMA 50, EMA 200.
+  + Chỉ số sức mạnh tương đối: RSI (14 phiên).
+  + Động lượng: MACD (12, 26, 9) kèm Histogram và tín hiệu Bullish/Bearish Cross.
+  + Biên độ giá: Bollinger Bands (20 phiên, 2 độ lệch chuẩn).
+  + Độ biến động thực tế: ATR (14 phiên).
+  + Thanh khoản: Volume SMA (20 phiên).
+
+--------------------------------------------------------------------------------
+3. BỘ LỌC THỊ TRƯỜNG CHUNG (VN-INDEX MARKET REGIME GATE)
+--------------------------------------------------------------------------------
+- Tự động lấy dữ liệu chỉ số VN-Index qua endpoint chuyên dụng `ohlcs/index` (1D & 15m).
+- Phân loại trạng thái thị trường VN-Index theo 3 cấp độ:
+  + BULLISH (Thị trường thuận lợi): Giá >= EMA21 và RSI >= 48 -> Cho phép mở mua mới.
+  + SIDEWAYS (Thị trường giằng co): Vùng tích lũy -> Giao dịch thận trọng.
+  + BEARISH (Thị trường rủi ro / Downtrend): Giá < EMA50 hoặc (Giá < EMA21 & RSI < 45).
+- Cơ chế Khóa Mua tự động (Market Gate):
+  + Khi VN-Index rơi vào trạng thái BEARISH, bot TỰ ĐỘNG CHẶN TOÀN BỘ VỊ THẾ MUA MỚI
+    (áp dụng cho cả Paper Trading và Live Trading) để bảo toàn vốn trước các đợt sụt giảm.
+  + Việc theo dõi và kích hoạt bán chốt lời/cắt lỗ cho các vị thế sẵn có vẫn hoạt động 100%.
+
+--------------------------------------------------------------------------------
+4. CHIẾN LƯỢC ĐA KHUNG THỜI GIAN & QUẢN TRỊ RỦI RO ĐỘNG (MTF COMBO)
+--------------------------------------------------------------------------------
+- Chiến lược phối hợp Đa Khung Thời Gian (1D Trend + 15m Trigger):
+  + Chiến lược A (Trend Breakout MTF):
+    * 1D (Macro Trend): Giá > EMA21 > EMA50, MACD dương, Vol 1D >= 1.3x VolSMA20.
+    * 15m (Timing Trigger): Nến 15m xanh xác nhận bứt phá, MACD 15m dương; tự động
+      hủy lệnh nếu 15m xuất hiện cây nến đỏ xả mạnh bất thường.
+  + Chiến lược B (Pullback / Buy on Dip MTF):
+    * 1D (Macro Trend): Xu hướng tăng lớn (Giá > EMA50 hoặc EMA200).
+    * 15m (Timing Trigger): Nến 15m nhúng về hỗ trợ (EMA21 hoặc Lower BB), RSI 15m
+      hạ nhiệt về 30-45 và xuất hiện nến đảo chiều rút chân.
+- Quản trị rủi ro thích ứng theo độ biến động (Dynamic ATR Risk Management):
+  + Cắt lỗ động (Dynamic Stop Loss): Co giãn theo 1.5 x ATR (từ -3.5% đến -6.5%).
+  + Chốt lời Mục tiêu 1 (TP1): Co giãn theo 1.5 x ATR (từ +5.0% đến +7.0%).
+  + Chốt lời Mục tiêu 2 (TP2): Co giãn theo 2.5 x ATR (từ +8.0% đến +12.0%) hoặc +7.5% nếu RSI > 75.
+  + Trailing Stop động: Giảm từ 2.0% đến 3.5% từ đỉnh cao nhất sau khi vị thế đã có lãi.
+- Cơ chế Chốt lời 2 giai đoạn (2-Step Partial Take Profit):
+  + Giai đoạn 1 (Chốt TP1): Khi lãi chạm Target 1, bot tự động bán 50% khối lượng
+    (tuân thủ chặt chẽ quy định lô chẵn/lô lẻ sàn HOSE) để hiện thực hóa một phần lợi nhuận.
+  + Giai đoạn 2 (Bảo toàn vốn & Gồng lãi):
+    * 50% khối lượng còn lại được kích hoạt điểm dừng lỗ Hòa Vốn (Breakeven - bán khi giá quay về giá vốn).
+    * Thả 50% còn lại theo Trailing Stop động hoặc giữ đến khi chạm Target 2 để tối đa hóa lợi nhuận sóng lớn.
+
+--------------------------------------------------------------------------------
+5. QUẢN TRỊ RỦI RO DANH MỤC & CẦU DAO TỰ ĐỘNG (PORTFOLIO RISK & CIRCUIT BREAKER)
+--------------------------------------------------------------------------------
+- Phân bổ vốn 2 Lớp (2-Layer Position Sizing: ATR-Risk + Trần Cứng 25% NAV):
+  + Lớp 1 (Rủi ro biến động ATR):
+    * qty_by_risk = (NAV * 1.5%) / (1.5 * ATR)
+    * Giới hạn khoảng dừng lỗ trong biên độ an toàn [-3.5%, -6.5%].
+  + Lớp 2 (Trần cứng tỷ trọng % NAV - Hard Cap):
+    * qty_by_cap = (NAV * 25%) / current_price
+    * Khống chế tối đa 25% NAV cho mỗi vị thế, ngăn chặn mã ATR thấp phình to vol quá mức.
+  + Cơ chế min(): final_qty = min(qty_by_risk, qty_by_cap).
+    * Mã biến động mạnh (ATR cao) -> Size nhỏ an toàn theo Lớp 1.
+    * Mã biến động nhỏ (ATR thấp) -> Bị chặn lại ở trần 25% NAV theo Lớp 2.
+  + Hỗ trợ đầy đủ Lô chẵn (bội số 100) và Lô lẻ (1 đến 99 cổ phiếu).
+- Cam kết Tuyệt đối Không Sử dụng Margin (Strict Non-Margin / Cash-Only):
+  + Không bao giờ vay nợ, không kích hoạt gói vay margin trên DNSE.
+  + Sức mua bị chặn cứng bởi Tiền mặt khả dụng (available_cash).
+  + Khi đặt lệnh trên sàn DNSE, bot tự động ưu tiên gói tài khoản thường (Normal Cash Account, type == "N").
+- Giới hạn quy mô danh mục (Slot Limits):
+  + Khống chế tối đa 4 mã cổ phiếu nắm giữ đồng thời để tối ưu hóa hiệu quả quản trị.
+- Quản trị rủi ro tập trung ngành (Sector Concentration Risk Limit - Tối đa 2 mã/ngành):
+  + Phân loại tường minh toàn bộ 30 mã VN30 thành 12 nhóm ngành chuẩn ICB:
+    * NGÂN HÀNG (13 mã): ACB, BID, CTG, HDB, MBB, SHB, SSB, STB, TCB, TPB, VCB, VIB, VPB (và TCX).
+    * BẤT ĐỘNG SẢN (4 mã): BCM, VHM, VIC, VRE.
+    * THÉP & VẬT LIỆU (1 mã): HPG.
+    * DẦU KHÍ & XĂNG DẦU (3 mã): GAS, PLX, BSR (Tách riêng khỏi Điện, biến động theo giá dầu thế giới).
+    * ĐIỆN & TIỆN ÍCH (1 mã): POW (Tách riêng nhóm tiện ích phòng thủ, không triệt tiêu slot của Dầu khí).
+    * CÔNG NGHỆ (1 mã): FPT.
+    * BÁN LẺ (2 mã): MWG, PNJ.
+    * THỰC PHẨM & ĐỒ UỐNG (4 mã): MSN, MCH, SAB, VNM.
+    * CHỨNG KHOÁN (1 mã): SSI.
+    * BẢO HIỂM (1 mã): BVH.
+    * HÀNG KHÔNG (1 mã): VJC.
+    * CAO SU & VẬT LIỆU (1 mã): GVR (Định vị rõ mủ cao su tự nhiên & chuyển đổi đất KCN, tách biệt khỏi BĐS dân dụng).
+  + Khống chế tối đa 2 mã cùng ngành được phép mở vị thế đồng thời trong 4 slot danh mục.
+  + Giải quyết dứt điểm rủi ro tập trung nhóm Ngân hàng, ngăn ngừa nguy cơ cả 4 slot danh mục đều là bank.
+  + Cơ chế chọn lọc tín hiệu thông minh trong Auto-Trader: Nếu một ngành đã có đủ 2 mã, bot tự động bỏ qua tín hiệu cùng ngành đó và chọn lọc tín hiệu có độ tin cậy cao tiếp theo từ ngành khác (FPT, HPG, MWG...).
+  + Đồng thời áp dụng chốt chặn trên cả lệnh thủ công /buy_paper và /buy_live.
+  + Lệnh Telegram /sectors (hoặc /nganh) giúp Admin audit trực quan số lượng vị thế đang mở của từng ngành.
+- Trần phơi nhiễm danh mục (Portfolio Exposure Cap = 85% NAV):
+  + Giới hạn tổng giá trị các vị thế mở tối đa 85% NAV (luôn giữ đệm 15% tiền mặt an toàn).
+  + Tự động co hẹp khối lượng vị thế thứ 4 vừa khít ngân sách phơi nhiễm còn lại.
+  + Nếu final_qty < 1: Tự động từ chối mở vị thế ("Vốn còn lại không đủ để mở vị thế tối thiểu").
+- Cầu dao tự ngắt theo Drawdown (Daily & Weekly Circuit Breaker):
+  + Tự động kích hoạt Cầu Dao Khẩn Cấp (Emergency Kill Switch), hủy lệnh chờ trên sàn HOSE,
+    khóa chuyển về READ_ONLY và phát chuông báo động đỏ trên Telegram khi:
+    * Drawdown trong ngày sụt giảm <= -3.0% NAV.
+    * Drawdown trong tuần sụt giảm <= -7.0% NAV.
+  + Yêu cầu Admin phải gõ lệnh /resume thủ công sau khi đánh giá lại thị trường.
+
+--------------------------------------------------------------------------------
+6. HỆ THỐNG TIN TỨC & BỘ PHÂN TÍCH CẢM TÍNH (NEWS COMBO ENGINE)
+--------------------------------------------------------------------------------
+- Bộ cào tin tức tự động đa nguồn (Multi-source News Crawler):
+  + Quét tin tức liên tục từ 2 trang báo tài chính hàng đầu: CafeF và Vietstock
+    (Chuyên mục Thị trường Chứng khoán & Doanh nghiệp).
+  + Thu thập siêu tốc bằng Async HTTPX (< 2 giây), không dùng trình duyệt nặng nề.
+  + Khử trùng lặp tự động bằng mã băm SHA-256 và lưu trữ vào database SQLite.
+- Bộ phân tích cảm tính tài chính Tiếng Việt (Offline Sentiment Engine):
+  + Phân tích từ điển ngữ cảnh tài chính chuyên sâu (tăng trưởng, lợi nhuận, phá đỉnh,
+    thoái vốn, nợ xấu, lỗ ròng, điều tra, vi phạm, phá sản...).
+  + Xử lý Ngữ nghĩa Phủ định Câu Tiếng Việt (Vietnamese Negation Handling):
+    * Nhận diện tiền tố phủ định ("không", "chưa", "chẳng", "không hề", "không có", "bác bỏ", "tránh được", "thoát khỏi"...)
+      trong phạm vi mệnh đề 1-5 từ trước từ khóa.
+    * Đảo/triệt tiêu điểm số tiêu cực ảo ("không thua lỗ", "chưa lỗ", "không giảm", "không bị phạt" -> chuyển thành trung lập/tích cực nhẹ +0.1).
+    * Triệt tiêu cờ khủng hoảng khẩn cấp ("bác bỏ tin đồn bị khởi tố" -> không kích hoạt bán tháo nhầm).
+    * Bảo vệ tối đa bộ lọc mua, loại bỏ 100% nguy cơ VETO Mua Oan Uổng khi tin tức thực chất là đính chính hoặc khẳng định kết quả ổn định.
+  + Hệ thống Alias thông minh tự động nhận diện thương hiệu sang mã VN30:
+    Vinamilk -> VNM, Hòa Phát -> HPG, Thế Giới Di Động -> MWG, Vietcombank -> VCB...
+  + Tốc độ xử lý siêu tốc (< 5ms), hoạt động offline 100%, không mất phí API ngoài.
+- Phân hệ Sự Kiện Doanh Nghiệp & Công Bố Thông Tin Chính Thức (Corporate Actions Engine):
+  + Tự động thu thập dữ liệu lịch sự kiện, quyền lợi và công bố thông tin chính thức
+    (Ngày GDKHQ, Ngày ĐKCC, Cổ tức tiền mặt, Cổ tức cổ phiếu, Phát hành thêm/ESOP, Bổ nhiệm/Miễn nhiệm).
+  + Tự Động Toàn Bộ (Full Automation Actions):
+    * Tự động Chặn Mua Ngày GDKHQ (Ex-Date Buy Lockout): Vào ngày GDKHQ, giá tham chiếu bị
+      điều chỉnh giảm kỹ thuật, bot tự động VETO hủy mở mua mã đó để tránh rủi ro biến động giá
+      và kẹp vốn cổ tức/cổ phiếu thưởng; tự động chọn candidate tiếp theo.
+    * Tự Động Điều Chỉnh Kỹ Thuật Vị Thế Đang Nắm Giữ (Technical Position Adjustment on Ex-Date):
+      Khi cổ phiếu đang giữ có ngày GDKHQ trả cổ tức cổ phiếu, chia tách hoặc cổ tức tiền mặt:
+      - Tự động bóc tách tỷ lệ điều chỉnh (ví dụ: cổ tức 15%, chia tách 2:1, tiền mặt 1.500đ/cp).
+      - Áp dụng chuẩn VSD/HOSE: Cắt cụt phần lẻ (`Qty_new = math.floor(Qty_old * multiplier)`),
+        tuyệt đối không làm tròn lên tránh sinh ra khối lượng ảo; ghi log/thông báo phần dư lẻ chi trả bằng tiền mặt.
+      - Tự động hạ giá vốn bình quân (Avg_new = Avg_old / multiplier hoặc Avg_old - d_cash) và giá đỉnh trailing.
+      - Nhờ đó, các ngưỡng Stop Loss (-5%), Take Profit (+8%) và Trailing Stop tự động khớp chuẩn xác
+        với mặt bằng giá tham chiếu mới, ngăn ngừa 100% rủi ro bị kích hoạt Cắt Lỗ Oan Uổng (False Stop Loss).
+      - Đảm bảo tính Idempotent: Ghi nhận vào bảng `position_adjustments` trong SQLite, cam kết không bao giờ điều chỉnh trùng lặp.
+    * Đối Chiếu Vị Thế Sàn DNSE trong Chế độ LIVE (Live Position Reconciliation):
+      - Tần suất Thích ứng Thông minh (Adaptive Interval):
+        + Chạy định kỳ mỗi 30 phút trong các ngày diễn ra sự kiện quyền (ngày GDKHQ ± 1 ngày: hôm trước, hôm nay, ngày mai).
+        + Chạy định kỳ mỗi 60 phút trong các ngày giao dịch thông thường.
+        + Hỗ trợ lệnh thủ công `/reconcile` (hoặc `/doichieu`) để Admin đối chiếu tức thì bất kỳ lúc nào.
+      - So khớp trực tiếp khối lượng và giá vốn nội bộ với dữ liệu chính thức do DNSE ghi nhận.
+      - Nếu phát hiện chênh lệch (lệch số lượng hoặc lệch giá vốn > 0.5%): Tự động ưu tiên đồng bộ theo số liệu
+        chuẩn của DNSE và phát cảnh báo Telegram màu vàng cho Admin để tuyệt đối an toàn khi đi lệnh thật.
+      - Bảo vệ vị thế cá nhân: Chỉ đồng bộ vị thế do bot quản lý, không tự ý can thiệp hay bán các cổ phiếu đầu tư riêng ngoài danh mục của Admin trên tài khoản DNSE.
+    * Tự động Cảnh Báo Sớm GDKHQ: Nhắc nhở Admin trước 1 ngày đối với các cổ phiếu đang nắm giữ.
+    * Tự động Hạ Điểm Tin Cậy Pha Loãng: Giảm -0.15 điểm tin cậy khi có tin phát hành thêm hoặc niêm yết bổ sung lượng lớn.
+- Chiến lược Phối hợp Kỹ thuật + Tin tức (News Combo Logic):
+  + MUA (BUY Combo):
+    * Veto (Chặn mua): Nếu chỉ báo kỹ thuật báo MUA nhưng cổ phiếu dính tin tức tiêu cực
+      (Điểm cảm tính <= -0.25), bot tự động HỦY LỆNH MUA để bảo vệ an toàn vốn.
+    * Boost (Tăng tự tin): Nếu có tin tức tích cực (Điểm cảm tính >= +0.25), bot cộng
+      thêm +0.15 điểm tin cậy cho tín hiệu.
+  + BÁN (SELL Combo): Khi có tín hiệu bán kỹ thuật trùng với tin tức tiêu cực, bot tự động
+    nâng cao mức độ khẩn cấp (Urgency Alert) trong thông báo gửi Telegram.
+- Thoát hiểm khẩn cấp khi gặp Khủng hoảng (Option 2B - Severe Crisis Exit):
+  + Nhận diện các sự kiện rủi ro đặc biệt nghiêm trọng ("khởi tố", "bắt tạm giam",
+    "thanh tra", "đình chỉ giao dịch", "phá sản", "vỡ nợ"...).
+  + Tức thì kích hoạt cơ chế CRISIS_EXIT: Bán sạch 100% vị thế của mã đó (khi cổ phiếu đã
+    về T+2) ngay lập tức mà KHÔNG CHỜ chạm Stop Loss kỹ thuật, đồng thời phát cảnh báo khẩn cấp màu đỏ.
+
+--------------------------------------------------------------------------------
+7. HỆ THỐNG MÔ PHỎNG PAPER TRADING (GIẢ LẬP SÁT THỰC TẾ)
+--------------------------------------------------------------------------------
+- Vốn khởi tạo mặc định: 5.000.000 VNĐ lưu trữ trong database SQLite nội bộ.
+- Mô phỏng trượt giá chuẩn sàn HOSE (Realistic Slippage Simulation):
+  + Tham số mặc định `slippage_pct = 0.1%` (10 bps), có thể tùy chỉnh.
+  + Lệnh Mua: Giá khớp thực tế trượt tăng +0.1% và làm tròn theo bước giá HOSE (10đ / 50đ / 100đ).
+  + Lệnh Bán: Giá khớp thực tế trượt giảm -0.1% và làm tròn theo bước giá HOSE.
+  + Tự động ghi nhận giá khớp trượt vào sổ lệnh, giá vốn vị thế (VWAP), phí thuế và PnL thực tế,
+    giúp hiệu suất giả lập sát với thực tế môi trường LIVE, tránh tâm lý lạc quan ảo.
+- Hỗ trợ đầy đủ Lô Chẵn (bội số 100) & Lô Lẻ (1 đến 99 cổ phiếu).
+- Chu kỳ thanh toán chuẩn T+2 (kiểm soát chặt cổ phiếu chờ về và khả dụng).
+- Thuế & Phí sàn HOSE: Mua 0.15%, Bán 0.15% + Thuế 0.10% = 0.25%.
+- Chế độ Auto-Trade Paper tự động quét và đi lệnh định kỳ.
+
+--------------------------------------------------------------------------------
+8. DANH MỤC LỆNH TELEGRAM BOT CHI TIẾT
+--------------------------------------------------------------------------------
+[TÀI KHOẢN & HỆ THỐNG]
+  /start              : Khởi động bot và hiển thị bàn phím thao tác nhanh.
+  /help               : Xem hướng dẫn sử dụng toàn bộ các lệnh.
+  /status             : Tổng quan trạng thái bot, kết nối DNSE, VN-Index và bộ lọc mua.
+  /balance            : Tra cứu số dư tiền mặt tài khoản thật DNSE.
+  /portfolio          : Tra cứu danh mục cổ phiếu đang nắm giữ tại tài khoản thật DNSE.
+  /reconcile hoặc /doichieu: Đối chiếu trực tiếp danh mục nội bộ với dữ liệu thời gian thực sàn DNSE, phát hiện chênh lệch và hiển thị bảng so khớp chi tiết.
+  /pnl hoặc /performance: Báo cáo hiệu suất đầu tư (Realized PnL, Unrealized PnL, Win Rate %, Profit Factor, Drawdowns).
+  /mode               : Xem chế độ giao dịch hiện tại (paper, live_confirm, live_auto).
+  /mode <tên_chế_độ>  : Đổi chế độ giao dịch (ví dụ: /mode paper, /mode live_confirm).
+  /kill_switch        : Cầu dao khẩn cấp - Hủy toàn bộ lệnh trên sàn và khóa hệ thống.
+  /resume             : Mở khóa và khôi phục hoạt động sau khi ngắt cầu dao.
+
+
+[DỮ LIỆU & PHÂN TÍCH KỸ THUẬT]
+  /market             : Xem phân tích chi tiết chỉ số VN-Index, các đường EMA, RSI, MACD.
+  /vnindex            : Lệnh rút gọn tương tự /market.
+  /scan               : Quét toàn bộ 30 mã VN30 tìm tín hiệu Mua/Bán kỹ thuật.
+  /vn30               : Xem danh sách 30 mã cổ phiếu thành phần rổ VN30.
+  /quote <MÃ>         : Xem giá khớp lệnh mới nhất và nến ngày của mã (ví dụ: /quote FPT).
+  /indicators <MÃ>    : Xem toàn bộ chỉ số kỹ thuật (EMA, RSI, MACD, BB, ATR) của mã.
+  /sectors hoặc /nganh: Bảng phân loại 12 nhóm ngành ICB cho VN30 và kiểm tra giới hạn slot ngành (tối đa 2 mã/ngành).
+
+[TIN TỨC THỊ TRƯỜNG & CẢM TÍNH]
+  /news               : Xem top 5 tin tức chứng khoán mới nhất từ CafeF & Vietstock kèm điểm cảm tính.
+  /tin                : Lệnh rút gọn tương tự /news.
+  /news <MÃ>          : Xem tin tức liên quan và chỉ số tâm lý riêng của mã (ví dụ: /news FPT).
+  /events hoặc /sukien: Lịch sự kiện doanh nghiệp (cổ tức, GDKHQ, phát hành thêm, ESOP) hoặc tra cứu riêng /events <MÃ>.
+
+[MÔ PHỎNG GIAO DỊCH (PAPER TRADING)]
+  /paper              : Xem Dashboard tài khoản giả lập, phơi nhiễm NAV, số slot và drawdown ngày.
+  /signals            : Xem danh sách tín hiệu MTF (1D + 15m) theo 2 chiến lược Breakout & Pullback.
+  /buy_paper <MÃ> <KL> [GIÁ]  : Đặt lệnh mua giả lập thủ công (hỗ trợ lô chẵn và lô lẻ).
+  /sell_paper <MÃ> <KL> [GIÁ] : Đặt lệnh bán giả lập thủ công (kiểm tra cổ phiếu đã về T+2).
+  /autotrade_paper    : Xem trạng thái tự động đi lệnh giả lập (ON hay OFF).
+  /autotrade_paper on : Bật chế độ tự động mua bán giả lập theo tín hiệu và quản trị rủi ro.
+  /autotrade_paper off: Tắt chế độ tự động mua bán giả lập.
+  /reset_paper        : Đặt lại toàn bộ tài khoản giả lập về trạng thái ban đầu (5.000.000 VNĐ).
+
+[ĐẶT LỆNH THẬT SÀN HOSE (LIVE TRADING)]
+  /buy_live <MÃ> <KL> [GIÁ]   : Gửi lệnh mua thật lên sàn HOSE qua DNSE OpenAPI.
+  /sell_live <MÃ> <KL> [GIÁ]  : Gửi lệnh bán thật lên sàn HOSE qua DNSE OpenAPI.
+  /orders_live        : Tra cứu sổ lệnh thật trong ngày từ DNSE.
+  /cancel_live <ID>   : Gửi yêu cầu hủy lệnh đang chờ khớp trên sàn HOSE.
+
+================================================================================
+KẾT LUẬN:
+Hệ thống hiện tại là một giải pháp Trading Bot tự động toàn diện, kết hợp chặt chẽ
+giữa Đa Khung Thời Gian (1D Trend + 15m Trigger), Quản trị Rủi ro Danh mục (Trần 85% NAV,
+Position Sizing 2 Lớp: ATR-Risk + Trần Cứng 25% NAV, Cam kết 100% Không Margin,
+Giới hạn Tập trung Ngành: 12 nhóm ngành ICB tường minh, Tối đa 2 mã/ngành, Slot Limit 4 mã,
+Circuit Breaker -3% ngày / -7% tuần, Tự động hủy lệnh treo sau 15 phút, Mô phỏng trượt giá HOSE 0.1% sát thực tế,
+SQLite WAL đa luồng không khóa, Báo cáo PnL /pnl chuyên sâu),
+Động cơ Sự Kiện Doanh Nghiệp Tự Động (Lịch cổ tức, ngày GDKHQ, VETO mua ngày chốt quyền, cảnh báo sớm T-1, phạt pha loãng),
+và Trí tuệ Đọc Tin tức Cảm tính (CafeF & Vietstock) bảo vệ vốn tối đa.
+================================================================================
+

@@ -64,15 +64,27 @@ async def test_full_paper_trading_pipeline(tmp_path):
     pos_settled = await repo.get_position("TCB")
     assert pos_settled.available_quantity == pos.total_quantity
     
-    # 5. Trigger Take Profit (+8.5% gain)
+    # 5. Trigger Take Profit 1 (+8.5% gain -> triggers TP1 50%)
     tp_price = pos.avg_buy_price * 1.085
     summary.price = tp_price
     state.update_summary("TCB", summary)
     
-    # Next cycle should trigger Take-Profit SELL
+    # Next cycle triggers Take-Profit 1 (50%)
     alerts_exit = await trader.process_cycle()
     assert any("Chốt lời" in a for a in alerts_exit)
     
+    pos_after_tp1 = await repo.get_position("TCB")
+    assert pos_after_tp1 is not None
+    assert pos_after_tp1.tp1_taken is True
+    assert pos_after_tp1.total_quantity < pos.total_quantity
+
+    # 5b. Next price surge to +15% triggers TP2 (remaining 50%)
+    tp2_price = pos.avg_buy_price * 1.15
+    summary.price = tp2_price
+    state.update_summary("TCB", summary)
+    alerts_exit2 = await trader.process_cycle()
+    assert any("Chốt lời" in a for a in alerts_exit2)
+
     acc_final = await engine.get_account_summary()
     assert acc_final.total_realized_pnl > 0  # Profitable trade
     assert acc_final.stock_value == 0.0

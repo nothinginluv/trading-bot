@@ -177,3 +177,32 @@ def compute_technical_summary(series: OHLCVSeries) -> Optional[TechnicalSummary]
         macd_status=macd_status,
         composite_signal=composite
     )
+
+def evaluate_market_regime(summary: Optional[TechnicalSummary]) -> str:
+    """
+    Evaluates market regime based on benchmark index (e.g. VN-INDEX).
+    Returns 'BULLISH', 'BEARISH', or 'SIDEWAYS'.
+    - BEARISH: Price < EMA50 or (Price < EMA21 and RSI < 45) -> high risk, block new buys.
+    - BULLISH: Price >= EMA21 and RSI >= 48 -> healthy uptrend, allow new buys.
+    - SIDEWAYS: transitional / consolidation range.
+    """
+    if not summary:
+        return "SIDEWAYS"
+    
+    price = summary.price
+    ema21 = summary.ema21
+    ema50 = summary.ema50
+    rsi = summary.rsi14
+
+    # 1. Bearish conditions: Price broken below EMA50 or broken EMA21 with weak momentum
+    if ema50 is not None and price < ema50:
+        return "BEARISH"
+    if ema21 is not None and price < ema21 and rsi < 45.0:
+        return "BEARISH"
+
+    # 2. Bullish condition: Above short-term EMA21 with healthy momentum
+    if ema21 is not None and price >= ema21 and rsi >= 48.0:
+        return "BULLISH"
+
+    return "SIDEWAYS"
+

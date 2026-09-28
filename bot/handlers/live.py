@@ -176,6 +176,21 @@ async def cmd_buy_live(message: Message, live_trader: LiveTrader, state_obj: Tra
         return
 
     ref_price = summary.price if summary else price
+
+    # Sector concentration risk check
+    if live_trader.safeguards:
+        active_live_symbols = [
+            p.symbol for p in state_obj.positions
+            if (getattr(p, 'tradeQuantity', 0) > 0 or getattr(p, 'openQuantity', 0) > 0)
+        ]
+        valid_sec, sec_msg = live_trader.safeguards.validate_sector_concentration(symbol, active_live_symbols)
+        if not valid_sec:
+            await message.answer(
+                f"🛑 **LỆNH BỊ TỪ CHỐI BỞI QUẢN TRỊ RỦI RO NGÀNH:**\n{sec_msg}",
+                parse_mode="Markdown"
+            )
+            return
+
     res = await live_trader.route_order(
         symbol=symbol,
         side="NB",
@@ -360,7 +375,7 @@ async def cmd_orders_live(message: Message, client: Any, state_obj: TradingState
 
 
 @router.message(Command("cancel_live"))
-async def cmd_cancel_live(message: Message, client: Any, state_obj: TradingState):
+async def cmd_cancel_live(message: Message, client: Any, state_obj: TradingState, live_trader: Optional[LiveTrader] = None):
     parts = message.text.strip().split()
     if len(parts) < 2:
         await message.answer("⚠️ Cú pháp: `/cancel_live <MÃ_LỆNH>`", parse_mode="Markdown")
@@ -369,10 +384,15 @@ async def cmd_cancel_live(message: Message, client: Any, state_obj: TradingState
     order_id = parts[1].strip()
     account_no = state_obj.account.accounts[0].id if (state_obj.account and state_obj.account.accounts) else "0001880229"
     try:
-        success = await client.cancel_order(account_no, order_id)
-        if success:
+        res = await client.cancel_order(account_no, order_id)
+        is_ok = res.get("success", False) if isinstance(res, dict) else bool(res)
+        if is_ok:
+            if live_trader and hasattr(live_trader, "tracked_live_orders") and order_id in live_trader.tracked_live_orders:
+                del live_trader.tracked_live_orders[order_id]
             await message.answer(f"✅ Đã gửi yêu cầu hủy lệnh `{order_id}` lên DNSE thành công.", parse_mode="Markdown")
         else:
-            await message.answer(f"❌ Hủy lệnh `{order_id}` thất bại trên DNSE.", parse_mode="Markdown")
+            err_msg = res.get("message", "Thất bại") if isinstance(res, dict) else "Thất bại"
+            await message.answer(f"❌ Hủy lệnh `{order_id}` thất bại trên DNSE: {err_msg}", parse_mode="Markdown")
     except Exception as e:
         await message.answer(f"❌ Lỗi khi hủy lệnh: {e}", parse_mode="Markdown")
+

@@ -1,7 +1,10 @@
+import logging
+import time
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
-import time
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -46,7 +49,7 @@ async def cmd_positions(message: Message, state_obj, client):
         await message.answer("📊 **DANH MỤC VỊ THẾ**\n──────────────────────\nHiện tại tài khoản chưa mở vị thế cổ phiếu nào.")
         return
 
-    lines = ["📊 **DANH MỤC VỊ THẾ (VN30)**\n──────────────────────"]
+    lines = [f"📊 **DANH MỤC VỊ THẾ ({len(state_obj.positions)}/4 mã)**\n──────────────────────"]
     total_pnl = 0.0
     for p in state_obj.positions:
         icon = "🟢" if p.unrealizedPnl > 0 else ("🔴" if p.unrealizedPnl < 0 else "⚪")
@@ -81,3 +84,167 @@ async def cmd_sync(message: Message, state_obj, client, repo):
         sub_id, bal.stock.totalCash, bal.stock.availableCash, bal.stock.totalDebt, bal.stock.withdrawableCash
     )
     await message.answer(f"✅ Đã làm mới xong ({latency:.0f}ms)! Bấm 💰 Số dư hoặc 📊 Vị thế để xem.")
+
+@router.message(Command("pnl"))
+@router.message(Command("performance"))
+@router.message(lambda msg: msg.text == "📊 Hiệu suất PnL")
+async def cmd_pnl(
+    message: Message,
+    state_obj,
+    paper_engine=None,
+    paper_repo=None,
+    safeguards=None
+):
+    if not paper_repo or not paper_engine:
+        await message.answer("⚠️ Dịch vụ phân tích hiệu suất chưa sẵn sàng.", parse_mode="Markdown")
+        return
+
+    current_prices = {
+        sym: s.price for sym, s in state_obj.vn30_summaries.items()
+    }
+    account = await paper_engine.get_account_summary(current_prices)
+    positions = await paper_repo.get_positions()
+    stats = await paper_repo.get_performance_statistics()
+
+    total_unrealized_pnl = 0.0
+    for pos in positions:
+        mkt_price = current_prices.get(pos.symbol, pos.avg_buy_price)
+        total_unrealized_pnl += (mkt_price - pos.avg_buy_price) * pos.total_quantity
+
+    total_combined_pnl = stats["total_realized_pnl"] + total_unrealized_pnl
+    pnl_pct_nav = (total_combined_pnl / account.initial_balance * 100) if account.initial_balance > 0 else 0.0
+
+    active_positions = [p for p in positions if p.total_quantity > 0]
+    exposure_pct = (account.stock_value / account.nav * 100) if account.nav > 0 else 0.0
+
+    dd_day_str = "0.00%"
+    if state_obj.nav_day_start and state_obj.nav_day_start > 0:
+        dd_day = ((account.nav - state_obj.nav_day_start) / state_obj.nav_day_start) * 100
+        dd_day_str = f"{dd_day:+.2f}%"
+
+    dd_week_str = "0.00%"
+    if state_obj.nav_week_start and state_obj.nav_week_start > 0:
+        dd_week = ((account.nav - state_obj.nav_week_start) / state_obj.nav_week_start) * 100
+        dd_week_str = f"{dd_week:+.2f}%"
+
+    circuit_breaker_status = "🟢 Bình thường"
+    if safeguards and safeguards.is_read_only:
+        circuit_breaker_status = f"🔴 NGẮT CẦU DAO ({safeguards.read_only_reason})"
+
+    win_icon = "🟢" if stats["win_rate_pct"] >= 50 else ("🟡" if stats["win_rate_pct"] >= 35 else "🔴")
+    pnl_icon = "🟢" if total_combined_pnl >= 0 else "🔴"
+
+    text = (
+        "📊 **BÁO CÁO HIỆU SUẤT ĐẦU TƯ (PERFORMANCE & PNL)**\n"
+        "──────────────────────\n"
+        f"💰 **Tổng tài sản (NAV):** `{account.nav:,.0f} đ`\n"
+        f"💵 **Vốn ban đầu:** `{account.initial_balance:,.0f} đ`\n"
+        f"🎯 **Phơi nhiễm danh mục:** `{exposure_pct:.1f}% NAV` (Trần: 85% NAV)\n"
+        f"📂 **Quy mô danh mục:** `{len(active_positions)}/4 mã`\n"
+        "──────────────────────\n"
+        f"💵 **Lãi/Lỗ đã chốt (Realized):** `{stats['total_realized_pnl']:+,.0f} đ`\n"
+        f"⏳ **Lãi/Lỗ tạm tính (Unrealized):** `{total_unrealized_pnl:+,.0f} đ`\n"
+        f"{pnl_icon} **Tổng PnL toàn danh mục:** `{total_combined_pnl:+,.0f} đ` (`{pnl_pct_nav:+.2f}%`)\n"
+        "──────────────────────\n"
+        f"{win_icon} **Tỷ lệ thắng (Win Rate):** `{stats['win_rate_pct']:.1f}%` ({stats['winning_trades']}/{stats['total_trades']} lệnh chốt)\n"
+        f"⚖️ **Thắng / Thua / Hòa:** `{stats['winning_trades']}` 🟢 | `{stats['losing_trades']}` 🔴 | `{stats['break_even_trades']}` ⚪\n"
+        f"📈 **Hệ số Lợi nhuận (Profit Factor):** `{stats['profit_factor']:.2f}`\n"
+        f"🏆 **Lệnh lãi cao nhất:** `{stats['best_trade']:+,.0f} đ`\n"
+        f"💥 **Lệnh lỗ nặng nhất:** `{stats['worst_trade']:+,.0f} đ`\n"
+        "──────────────────────\n"
+        f"📉 **Drawdown Ngày:** `{dd_day_str}` (Cầu dao: `-3.0%`)\n"
+        f"📉 **Drawdown Tuần:** `{dd_week_str}` (Cầu dao: `-7.0%`)\n"
+        f"🛡️ **Trạng thái Cầu dao:** {circuit_breaker_status}\n\n"
+        "👉 Gõ `/paper` xem chi tiết danh mục hoặc `/positions` xem danh mục thật."
+    )
+    await message.answer(text, parse_mode="Markdown")
+
+
+@router.message(Command("reconcile"))
+@router.message(Command("doichieu"))
+async def cmd_reconcile(
+    message: Message,
+    state_obj=None,
+    client=None,
+    paper_repo=None,
+    live_trader=None,
+    safeguards=None
+):
+    if not live_trader or not client:
+        await message.answer("⚠️ Dịch vụ LiveTrader hoặc kết nối DNSE chưa sẵn sàng.", parse_mode="Markdown")
+        return
+
+    repo = paper_repo
+    if not repo:
+        await message.answer("⚠️ Cơ sở dữ liệu danh mục chưa sẵn sàng.", parse_mode="Markdown")
+        return
+
+    await message.answer("🔍 Đang đối chiếu vị thế nội bộ với dữ liệu trực tiếp từ sàn DNSE...")
+    try:
+        await live_trader.reconcile_positions(repo, force=True)
+    except Exception as e:
+        logger.error(f"Error during manual reconcile: {e}")
+        await message.answer(f"❌ Lỗi khi đối chiếu với DNSE: {e}")
+        return
+
+    report = live_trader.last_reconcile_report
+    mode = safeguards.mode.value if safeguards else "UNKNOWN"
+    current_time_str = time.strftime("%H:%M:%S %d/%m/%Y")
+
+    if not report:
+        await message.answer(
+            f"🔍 **BÁO CÁO ĐỐI CHIẾU VỊ THẾ (RECONCILIATION)**\n"
+            f"──────────────────────\n"
+            f"⚙️ **Chế độ:** `{mode}`\n"
+            f"🕒 **Thời điểm:** `{current_time_str}`\n\n"
+            f"ℹ️ Không có vị thế mở nào ở cả danh mục nội bộ và tài khoản sàn DNSE.",
+            parse_mode="Markdown"
+        )
+        return
+
+    lines = [
+        "🔍 **BÁO CÁO ĐỐI CHIẾU VỊ THẾ (RECONCILIATION)**",
+        "──────────────────────",
+        f"⚙️ **Chế độ:** `{mode}`",
+        f"🕒 **Thời điểm:** `{current_time_str}`",
+        f"📊 **Số mã kiểm tra:** `{len(report)}` mã\n"
+    ]
+
+    discrepancy_count = 0
+    for item in report:
+        sym = item["symbol"]
+        loc_q = item["local_qty"]
+        dnse_q = item["dnse_qty"]
+        loc_c = item["local_cost"]
+        dnse_c = item["dnse_cost"]
+        disc = item["discrepancy"]
+        sync = item["synchronized"]
+
+        if disc:
+            discrepancy_count += 1
+            if sync:
+                status_icon = "⚠️"
+                status_text = "Phát hiện lệch → Đã đồng bộ theo DNSE"
+            else:
+                status_icon = "⚠️"
+                status_text = "Phát hiện lệch (Chế độ PAPER - Không ghi đè)"
+        else:
+            status_icon = "🟢"
+            status_text = "Khớp hoàn toàn 100%"
+
+        lines.append(
+            f"{status_icon} **{sym}**:\n"
+            f"   • Nội bộ: `{loc_q:,}` cp | Giá vốn `{loc_c:,.0f} đ`\n"
+            f"   • Sàn DNSE: `{dnse_q:,}` cp | Giá vốn `{dnse_c:,.0f} đ`\n"
+            f"   • Trạng thái: _{status_text}_"
+        )
+
+    lines.append("──────────────────────")
+    if discrepancy_count == 0:
+        lines.append("✅ Tất cả vị thế đều khớp chuẩn xác với tài khoản chứng khoán DNSE.")
+    else:
+        lines.append(f"⚠️ Phát hiện {discrepancy_count} mã có sự sai lệch.")
+
+    await message.answer("\n".join(lines), parse_mode="Markdown")
+
+

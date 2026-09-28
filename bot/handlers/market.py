@@ -63,6 +63,35 @@ async def cmd_indicators(message: Message, state_obj):
     )
     await message.answer(text, parse_mode="Markdown")
 
+@router.message(Command("market", "vnindex"))
+@router.message(lambda msg: msg.text in ("🏛️ VN-Index", "🏛️ Thị trường VN-Index"))
+async def cmd_market(message: Message, state_obj):
+    s = state_obj.vnindex_summary
+    if not s:
+        await message.answer("⚠️ Dữ liệu VN-Index đang được cập nhật, vui lòng thử lại sau giây lát.", parse_mode="Markdown")
+        return
+
+    regime = state_obj.market_regime
+    regime_emoji = "🟢" if regime == "BULLISH" else ("🔴" if regime == "BEARISH" else "🟡")
+    gate_status = "✅ CHO PHÉP MỞ VỊ THẾ MUA MỚI" if regime != "BEARISH" else "🛑 ĐANG CHẶN MUA MỚI (BẢO TOÀN VỐN)"
+
+    text = (
+        f"🏛️ **THỊ TRƯỜNG CHUNG: VN-INDEX (1D)**\n"
+        "──────────────────────\n"
+        f"• **Điểm số:** `{s.price:,.2f}` ({s.change_pct:+.2f}% | `{s.change:+.2f}` đ)\n"
+        f"• **Trạng thái:** {regime_emoji} **{regime}**\n"
+        f"• **Bộ lọc giải ngân:** {gate_status}\n"
+        "──────────────────────\n"
+        f"• **Đường EMA:** 21: `{s.ema21:,.1f}` | 50: `{s.ema50:,.1f}`\n"
+        f"• **RSI (14):** `{s.rsi14:.1f}` ({s.rsi_status})\n"
+        f"• **MACD:** `{s.macd:+.2f}` | Hist: `{s.macd_hist:+.2f}` ({s.macd_status})\n"
+        f"• **Bollinger Bands:** `{s.bb_lower:,.1f}` - `{s.bb_middle:,.1f}` - `{s.bb_upper:,.1f}`\n"
+        f"• **Khối lượng:** `{s.volume:,}` CP (`{s.vol_ratio:.1f}x` TB20)\n"
+        "──────────────────────\n"
+        f"💡 *Ghi chú: Khi VN-Index ở trạng thái BEARISH (Dưới EMA21, RSI < 45 hoặc thủng EMA50), bot sẽ tự động ngừng giải ngân mới để bảo toàn vốn.*"
+    )
+    await message.answer(text, parse_mode="Markdown")
+
 @router.message(Command("scan"))
 @router.message(lambda msg: msg.text == "🔍 Quét VN30")
 async def cmd_scan(message: Message, state_obj):
@@ -70,8 +99,17 @@ async def cmd_scan(message: Message, state_obj):
         await message.answer("⚠️ Dữ liệu VN30 đang được khởi tạo, vui lòng bấm lại sau 30 giây.")
         return
 
+    regime = state_obj.market_regime
+    regime_emoji = "🟢" if regime == "BULLISH" else ("🔴" if regime == "BEARISH" else "🟡")
+    gate_text = "MUA ĐƯỢC PHÉP" if regime != "BEARISH" else "TẠM CHẶN MUA (BẢO VỆ VỐN)"
+    vnindex_text = f"`{state_obj.vnindex_summary.price:,.1f}`" if state_obj.vnindex_summary else "N/A"
+
     res = scan_vn30_market(state_obj.vn30_summaries)
-    lines = ["🔍 **KẾT QUẢ QUÉT TÍN HIỆU RỔ VN30 (1D)**\n──────────────────────"]
+    lines = [
+        f"🔍 **KẾT QUẢ QUÉT TÍN HIỆU RỔ VN30 (1D)**",
+        f"• **VN-Index:** {vnindex_text} | {regime_emoji} `{regime}` ({gate_text})",
+        "──────────────────────"
+    ]
 
     # 1. Breakout
     lines.append("🚀 **BÙNG NỔ KHỐI LƯỢNG & GIÁ (Breakout):**")
@@ -119,3 +157,50 @@ async def cmd_vn30(message: Message, state_obj):
         lines.append(f"• **{s.symbol}**: `{s.price:,.1f}` (`{s.change_pct:+.2f}%`) | Vol: `{s.volume:,}`")
 
     await message.answer("\n".join(lines), parse_mode="Markdown")
+
+@router.message(Command("sectors", "nganh"))
+async def cmd_sectors(
+    message: Message,
+    state_obj=None,
+    paper_repo=None,
+    safeguards=None
+):
+    from config.constants import VN30_SECTOR_MAP
+    sectors_dict = {}
+    for sym, sec in VN30_SECTOR_MAP.items():
+        sectors_dict.setdefault(sec, []).append(sym)
+
+    active_symbols = set()
+    if paper_repo:
+        try:
+            positions = await paper_repo.get_positions()
+            active_symbols = {p.symbol for p in positions if p.total_quantity > 0}
+        except Exception:
+            pass
+    elif state_obj and hasattr(state_obj, "positions") and state_obj.positions:
+        active_symbols = {
+            p.symbol for p in state_obj.positions
+            if (getattr(p, 'tradeQuantity', 0) > 0 or getattr(p, 'openQuantity', 0) > 0)
+        }
+
+    max_sec = safeguards.max_positions_per_sector if safeguards else 2
+
+    lines = [
+        "🏢 **BẢNG PHÂN LOẠI NGÀNH VN30 (ICB CẤP 2) & QUẢN TRỊ RỦI RO**\n"
+        f"• **Hạn mức cùng ngành:** Tối đa `{max_sec} mã/ngành` trong tổng 4 slot.\n"
+        "──────────────────────"
+    ]
+
+    for sec, syms in sorted(sectors_dict.items()):
+        held_in_sec = [s for s in syms if s in active_symbols]
+        count = len(held_in_sec)
+        status_tag = ""
+        if count >= max_sec:
+            status_tag = f" 🛑 **[ĐẦY {count}/{max_sec}]**"
+        elif count > 0:
+            status_tag = f" 🟡 **[{count}/{max_sec}]**"
+
+        syms_str = ", ".join(f"`{s}` (Đang giữ)" if s in active_symbols else f"`{s}`" for s in sorted(syms))
+        lines.append(f"📌 **{sec}** ({len(syms)} mã){status_tag}:\n{syms_str}")
+
+    await message.answer("\n\n".join(lines), parse_mode="Markdown")

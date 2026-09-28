@@ -20,6 +20,8 @@ from strategy.paper_engine import PaperEngine
 from strategy.auto_trader import AutoTrader
 from core.risk_safeguards import RiskSafeguards, TradingMode
 from strategy.live_trader import LiveTrader
+from news.crawler import AsyncNewsCrawler
+from news.sentiment import NewsSentimentAnalyzer
 
 def setup_logging():
     os.makedirs("logs", exist_ok=True)
@@ -102,12 +104,22 @@ async def main():
 
     # 7. Background Scheduler & Market Client
     market_client = AsyncMarketClient()
-    scheduler = setup_scheduler(client, state, repo, notifier, market_client=market_client, auto_trader=auto_trader)
+    news_crawler = AsyncNewsCrawler()
+    news_analyzer = NewsSentimentAnalyzer()
+
+    scheduler = setup_scheduler(
+        client, state, repo, notifier,
+        market_client=market_client,
+        auto_trader=auto_trader,
+        news_crawler=news_crawler,
+        news_analyzer=news_analyzer
+    )
     scheduler.start()
 
-    # Trigger initial market sync in background
-    from core.scheduler import sync_market_data_job
+    # Trigger initial market & news sync in background
+    from core.scheduler import sync_market_data_job, sync_news_job
     asyncio.create_task(sync_market_data_job(market_client, state, repo, notifier, None, auto_trader))
+    asyncio.create_task(sync_news_job(news_crawler, news_analyzer, state, repo, notifier, auto_trader))
 
     # 8. Startup Notification
     acc_name = state.account.name if state.account else 'Chưa kết nối'
@@ -123,6 +135,7 @@ async def main():
         f"• **Tiểu khoản:** `{sub_id}`\n"
         f"• **Tiền khả dụng:** `{cash:,.0f} đ`\n"
         f"• **Phiên thị trường:** {session_text}\n"
+        f"• **Tin tức:** CafeF & Vietstock (Hoạt động)\n"
         f"• **Chế độ:** {safeguards.mode.value} (An toàn vốn)",
         level="INFO"
     )
@@ -136,6 +149,7 @@ async def main():
         scheduler.shutdown()
         await client.close()
         await market_client.close()
+        await news_crawler.close()
         await bot.session.close()
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ logs/
 *.log
 
 # IDE & OS
+.superpowers/
 .vscode/
 .idea/
 .DS_Store

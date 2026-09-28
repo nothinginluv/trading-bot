@@ -4,11 +4,11 @@ from strategy.risk import calculate_position_size, check_exit_conditions
 def test_position_sizing_round_and_odd_lot():
     # 5,000,000 VND capital, target ~ 2,500,000 VND
     # Case 1: HPG at 26,000đ -> 2,500,000 / (26000 * 1.0015) ~ 96 shares -> Odd lot = 96
-    qty_odd = calculate_position_size(available_cash=5000000.0, nav=5000000.0, price=26000.0)
+    qty_odd = calculate_position_size(available_cash=5000000.0, nav=5000000.0, price=26000.0, max_slot_nav_pct=0.50)
     assert qty_odd == 96
     
     # Case 2: Available cash = 4,000,000đ, price = 15,000đ -> ~2,000,000 / (15000 * 1.0015) = 133 shares -> Round lot = 100
-    qty_round = calculate_position_size(available_cash=4000000.0, nav=4000000.0, price=15000.0)
+    qty_round = calculate_position_size(available_cash=4000000.0, nav=4000000.0, price=15000.0, max_slot_nav_pct=0.50)
     assert qty_round == 100
     
     # Case 3: Available cash = 200,000đ, FPT price = 130,000đ -> 1 share

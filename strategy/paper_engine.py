@@ -26,8 +26,39 @@ class PaperEngine:
     Applies standard HOSE/HNX fee (0.15% buy) and fee+tax (0.25% sell).
     Enforces T+2 clearing for available sellable shares.
     """
-    def __init__(self, repository: PaperTradingRepository):
+    def __init__(self, repository: PaperTradingRepository, slippage_pct: float = 0.001):
         self.repo = repository
+        self.slippage_pct = slippage_pct
+
+    def round_to_hose_tick(self, price: float) -> float:
+        """
+        Rounds price to valid HOSE tick sizes:
+        - Price < 10,000 VND: tick size 10 VND
+        - 10,000 <= Price < 50,000 VND: tick size 50 VND
+        - Price >= 50,000 VND: tick size 100 VND
+        """
+        if price < 10_000:
+            tick = 10.0
+        elif price < 50_000:
+            tick = 50.0
+        else:
+            tick = 100.0
+        return round(round(price / tick) * tick, 2)
+
+    def apply_slippage(self, price: float, side: OrderSide) -> float:
+        """
+        Applies slippage simulation:
+        - BUY: price increases by slippage_pct (conservative execution)
+        - SELL: price decreases by slippage_pct
+        Rounded to standard HOSE tick size.
+        """
+        if self.slippage_pct <= 0 or price <= 0:
+            return price
+        if side == OrderSide.BUY:
+            raw = price * (1.0 + self.slippage_pct)
+        else:
+            raw = price * (1.0 - self.slippage_pct)
+        return self.round_to_hose_tick(raw)
 
     async def initialize(self, initial_capital: float = 5_000_000.0) -> PaperAccount:
         return await self.repo.get_or_create_account(initial_capital)
@@ -55,8 +86,9 @@ class PaperEngine:
             await self.repo.record_order(order)
             return order
 
+        exec_price = self.apply_slippage(price, OrderSide.BUY)
         fee_rate = 0.0015
-        gross_cost = price * quantity
+        gross_cost = exec_price * quantity
         fee = round(gross_cost * fee_rate, 2)
         total_required = gross_cost + fee
 
@@ -67,7 +99,7 @@ class PaperEngine:
                 symbol=symbol,
                 side=OrderSide.BUY,
                 quantity=quantity,
-                price=price,
+                price=exec_price,
                 order_type=order_type,
                 status=OrderStatus.REJECTED,
                 fee=0.0
@@ -89,13 +121,13 @@ class PaperEngine:
             total_qty = existing_pos.total_quantity + quantity
             # Volume-weighted average price (VWAP)
             new_avg_price = (
-                (existing_pos.total_quantity * existing_pos.avg_buy_price) + (quantity * price)
+                (existing_pos.total_quantity * existing_pos.avg_buy_price) + (quantity * exec_price)
             ) / total_qty
-            highest_price = max(existing_pos.highest_price, price)
+            highest_price = max(existing_pos.highest_price, exec_price)
             available_qty = existing_pos.available_quantity  # Newly bought shares are unsettled
-            await self.repo.upsert_position(symbol, total_qty, available_qty, new_avg_price, highest_price)
+            await self.repo.upsert_position(symbol, total_qty, available_qty, new_avg_price, highest_price, tp1_taken=existing_pos.tp1_taken)
         else:
-            await self.repo.upsert_position(symbol, quantity, 0, price, price)
+            await self.repo.upsert_position(symbol, quantity, 0, exec_price, exec_price, tp1_taken=False)
 
         # Record settlement tranche for T+2
         await self.repo.add_settlement_tranche(symbol, quantity, buy_date_str, settle_date_str)
@@ -106,7 +138,7 @@ class PaperEngine:
             symbol=symbol,
             side=OrderSide.BUY,
             quantity=quantity,
-            price=price,
+            price=exec_price,
             order_type=order_type,
             status=OrderStatus.FILLED,
             fee=fee,
@@ -119,7 +151,7 @@ class PaperEngine:
             symbol=symbol,
             side=OrderSide.BUY,
             quantity=quantity,
-            price=price,
+            price=exec_price,
             fee=fee,
             tax=0.0,
             realized_pnl=0.0
@@ -165,10 +197,12 @@ class PaperEngine:
             await self.repo.record_order(order)
             return order
 
+        exec_price = self.apply_slippage(price, OrderSide.SELL)
+
         # Financials: fee 0.15%, tax 0.10%
         fee_rate = 0.0015
         tax_rate = 0.0010
-        gross_proceeds = price * quantity
+        gross_proceeds = exec_price * quantity
         fee = round(gross_proceeds * fee_rate, 2)
         tax = round(gross_proceeds * tax_rate, 2)
         net_received = gross_proceeds - fee - tax
@@ -193,7 +227,8 @@ class PaperEngine:
                 new_total_qty,
                 new_avail_qty,
                 existing_pos.avg_buy_price,
-                existing_pos.highest_price
+                existing_pos.highest_price,
+                tp1_taken=existing_pos.tp1_taken
             )
 
         # Record order and trade
@@ -202,7 +237,7 @@ class PaperEngine:
             symbol=symbol,
             side=OrderSide.SELL,
             quantity=quantity,
-            price=price,
+            price=exec_price,
             order_type=order_type,
             status=OrderStatus.FILLED,
             fee=fee,
@@ -215,7 +250,7 @@ class PaperEngine:
             symbol=symbol,
             side=OrderSide.SELL,
             quantity=quantity,
-            price=price,
+            price=exec_price,
             fee=fee,
             tax=tax,
             realized_pnl=realized_pnl
@@ -253,5 +288,6 @@ class PaperEngine:
                         pos.total_quantity,
                         pos.available_quantity,
                         pos.avg_buy_price,
-                        price
+                        price,
+                        tp1_taken=pos.tp1_taken
                     )

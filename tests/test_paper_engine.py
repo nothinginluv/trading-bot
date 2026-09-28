@@ -10,7 +10,7 @@ async def test_paper_engine_buy_and_sell_lifecycle(tmp_path):
     test_db = str(tmp_path / "test_paper_engine.db")
     await init_db(test_db)
     repo = PaperTradingRepository(db_path=test_db)
-    engine = PaperEngine(repo)
+    engine = PaperEngine(repo, slippage_pct=0.0)
     await engine.initialize(initial_capital=5000000.0)
     
     # 1. Execute BUY 10 shares of FPT at 130,000đ

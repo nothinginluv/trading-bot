@@ -1,0 +1,533 @@
+================================================================================
+                    HƯỚNG DẪN SỬ DỤNG HỆ THỐNG TRADING BOT TỰ ĐỘNG
+          AI AUTO TRADING BOT (VIETNAM STOCK MARKET - VN30 / DNSE OPENAPI)
+================================================================================
+Phiên bản: v0.10.0 (Bản cập nhật đầy đủ nhất)
+Hệ điều hành hỗ trợ: Windows 10 / 11
+Môi trường: Python 3.12+ / SQLite (WAL Concurrency) / Entrade API / DNSE OpenAPI
+Giao diện điều khiển: Telegram Bot (Hỗ trợ Bàn phím nhanh & Lệnh trực tiếp)
+
+--------------------------------------------------------------------------------
+MỤC LỤC
+--------------------------------------------------------------------------------
+PHẦN 1: BẮT ĐẦU NHANH (QUICK START)
+  1.1. Yêu cầu hệ thống
+  1.2. Hướng dẫn cấu hình file .env
+  1.3. Khởi động bot bằng file run_bot.bat hoặc dòng lệnh
+  1.4. Kiểm tra kết nối ban đầu trên Telegram
+
+PHẦN 2: CÁC NGUYÊN TẮC HOẠT ĐỘNG & BẢO VỆ TÀI KHOẢN
+  2.1. Bảo mật Whitelist Chat ID
+  2.2. Ba chế độ giao dịch: PAPER, LIVE_CONFIRM, LIVE_AUTO
+  2.3. Bộ lọc thị trường VN-Index (VN-Index Regime Gate)
+  2.4. Chiến lược đa khung thời gian (1D Trend + 15m Timing Trigger)
+  2.5. Quản trị rủi ro danh mục & Quy tắc phân bổ vốn
+  2.6. Chốt lời 2 giai đoạn & Dừng lỗ động theo biến động ATR
+  2.7. Cơ chế Cầu dao tự ngắt & Hủy lệnh treo quá hạn
+  2.8. Bộ phân tích tin tức cảm tính & Thoát hiểm khủng hoảng (Crisis Exit)
+  2.9. Động cơ sự kiện doanh nghiệp & Điều chỉnh kỹ thuật ngày GDKHQ
+
+PHẦN 3: BẢNG TRA CỨU TOÀN BỘ LỆNH TELEGRAM VÀ BÀN PHÍM THAO TÁC
+  3.1. Các nút bấm trên Bàn phím nhanh (Reply Keyboard)
+  3.2. Nhóm lệnh Quản trị hệ thống & Cấu hình
+  3.3. Nhóm lệnh Tra cứu Tài khoản & Sàn DNSE
+  3.4. Nhóm lệnh Thị trường, Chỉ báo & Nhóm ngành VN30
+  3.5. Nhóm lệnh Tin tức & Sự kiện Doanh nghiệp
+  3.6. Nhóm lệnh Mô phỏng Paper Trading (Giao dịch ảo)
+  3.7. Nhóm lệnh Đặt lệnh thật trên sàn HOSE (Live Trading)
+  3.8. Nhóm lệnh Báo cáo Hiệu suất Đầu tư (PnL Analytics)
+
+PHẦN 4: HƯỚNG DẪN THỰC HÀNH THEO CÁC KỊCH BẢN THỰC TẾ
+  4.1. Kịch bản 1: Người mới bắt đầu làm quen với Paper Trading
+  4.2. Kịch bản 2: Bật Auto-Trade tự động quét và đi lệnh giả lập
+  4.3. Kịch bản 3: Giao dịch tiền thật Bán tự động (Live Confirm)
+  4.4. Kịch bản 4: Xử lý tình huống khẩn cấp (Ngắt cầu dao / Mở lại hệ thống)
+  4.5. Kịch bản 5: Đối chiếu vị thế và xử lý sự kiện cổ tức ngày GDKHQ
+
+PHẦN 5: LÝ DO LỆNH BỊ TỪ CHỐI & CÁCH XỬ LÝ
+PHẦN 6: KHẮC PHỤC SỰ CỐ THƯỜNG GẶP (TROUBLESHOOTING)
+PHẦN 7: NGUYÊN TẮC BẢO MẬT VỐN & LỜI KHUYÊN ĐẦU TƯ
+
+================================================================================
+PHẦN 1: BẮT ĐẦU NHANH (QUICK START)
+================================================================================
+
+1.1. YÊU CẦU HỆ THỐNG
+--------------------------------------------------------------------------------
+- Máy tính chạy Windows 10 hoặc 11 (kết nối mạng Internet ổn định).
+- Python phiên bản từ 3.10 trở lên (khuyên dùng Python 3.12, tick chọn "Add python.exe to PATH" khi cài).
+- Tài khoản Telegram cá nhân để nhận cảnh báo và điều khiển bot.
+- Tài khoản chứng khoán tại Công ty Chứng khoán DNSE (nếu muốn dùng tính năng xem số dư thật hoặc đặt lệnh thật).
+
+1.2. HƯỚNG DẪN CẤU HÌNH FILE .env
+--------------------------------------------------------------------------------
+Trong thư mục gốc của bot (d:\TradingBot), tạo hoặc chỉnh sửa file `.env` (dựa trên mẫu `.env.example`).
+Nội dung file `.env` chuẩn như sau:
+
+    # 1. Thông tin xác thực DNSE OpenAPI
+    DNSE_API_KEY=dien_api_key_cua_ban_tai_day
+    DNSE_API_SECRET=dien_api_secret_cua_ban_tai_day
+    DNSE_ACCOUNT_ID=064C551408
+    DNSE_SUB_ACCOUNT=0001880229
+
+    # 2. Thông tin Telegram Bot
+    TELEGRAM_BOT_TOKEN=dien_bot_token_lay_tu_BotFather
+    TELEGRAM_CHAT_ID=7385637982
+
+    # 3. Cài đặt hệ thống
+    DRY_RUN=false
+    DB_PATH=storage/bot.db
+    LOG_LEVEL=INFO
+
+* Hướng dẫn lấy Token và Chat ID Telegram:
+  + Lấy TELEGRAM_BOT_TOKEN: Mở Telegram, tìm bot `@BotFather`, gửi `/newbot`, đặt tên bot và username. BotFather sẽ cấp cho bạn một chuỗi token có dạng `123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ`. Dán chuỗi này vào `TELEGRAM_BOT_TOKEN`.
+  + Lấy TELEGRAM_CHAT_ID: Tìm bot `@userinfobot` hoặc `@IDBot` trên Telegram, nhấn Start để lấy ID của bạn (ví dụ: `7385637982`). Dán vào `TELEGRAM_CHAT_ID`.
+  + Lấy DNSE API Key & Secret: Đăng nhập giao diện DNSE (Entrade X), vào mục Cài đặt -> Quản lý API để tạo API Key và API Secret.
+
+1.3. KHỞI ĐỘNG BOT
+--------------------------------------------------------------------------------
+Cách 1: Khởi động tự động bằng file run_bot.bat (Khuyên dùng)
+- Nhấp đúp chuột vào file `run_bot.bat` trong thư mục `d:\TradingBot`.
+- File này sẽ tự động:
+  1. Kiểm tra môi trường ảo Python `.venv` (tự động tạo mới nếu chưa có).
+  2. Kích hoạt môi trường ảo.
+  3. Cài đặt và cập nhật các thư viện trong `requirements.txt`.
+  4. Khởi chạy hệ thống `python main.py`.
+
+Cách 2: Chạy thủ công từ PowerShell hoặc Command Prompt
+- Mở PowerShell tại thư mục `d:\TradingBot`:
+    .venv\Scripts\activate
+    pip install -r requirements.txt
+    python main.py
+
+* Để chạy kiểm thử toàn diện toàn bộ 133 bài test tự động:
+    pytest -v
+
+1.4. KIỂM TRA KẾT NỐI BAN ĐẦU TRÊN TELEGRAM
+--------------------------------------------------------------------------------
+- Khi khởi động thành công, bot sẽ tự động gửi thông báo chào mừng về Telegram của Admin:
+    "Hệ Thống Đã Khởi Động Thành Công
+     • Máy chủ: Windows Local PC
+     • Chủ tài khoản: [Tên tài khoản] ([Số lưu ký])
+     • Tiền khả dụng: [xxx,xxx đ]
+     • Phiên thị trường: [Phiên sáng / Nghỉ trưa / Phiên chiều]
+     • Tin tức: CafeF & Vietstock (Hoạt động)
+     • Chế độ: PAPER (An toàn vốn)"
+- Mở cuộc trò chuyện với bot trên Telegram, gõ lệnh `/start` hoặc `/help` để hiển thị bàn phím điều khiển nhanh.
+
+
+================================================================================
+PHẦN 2: CÁC NGUYÊN TẮC HOẠT ĐỘNG & BẢO VỆ TÀI KHOẢN
+================================================================================
+
+2.1. BẢO MẬT WHITELIST CHAT ID
+--------------------------------------------------------------------------------
+- Bot được trang bị bộ lọc bảo mật phân quyền nghiêm ngặt.
+- DUY NHẤT tài khoản Telegram có Chat ID trùng khớp với `TELEGRAM_CHAT_ID` trong file `.env` mới có quyền xem thông tin tài sản và gửi lệnh điều khiển.
+- Mọi tin nhắn hoặc lệnh từ người lạ sẽ bị chặn đứng ngay lập tức, không để lộ thông tin tài khoản hay số dư.
+
+2.2. BA CHẾ ĐỘ GIAO DỊCH (TRADING MODES)
+--------------------------------------------------------------------------------
+Bot hỗ trợ 3 chế độ giao dịch, có thể chuyển đổi linh hoạt bằng lệnh `/mode`:
+1. Chế độ PAPER (Mặc định khi mở bot):
+   - Chế độ giả lập 100% an toàn.
+   - Bot chỉ ghi nhận giao dịch vào cơ sở dữ liệu nội bộ SQLite với số vốn ảo 5.000.000 VNĐ.
+   - Tuyệt đối không can thiệp, không đặt lệnh và không phát sinh bất kỳ rủi ro nào với tiền thật trên tài khoản DNSE.
+2. Chế độ LIVE_CONFIRM (Bán tự động - Semi-Auto):
+   - Chế độ khuyến nghị khi bắt đầu dùng tiền thật.
+   - Khi xuất hiện tín hiệu mua hoặc bán đạt chuẩn, bot KHÔNG tự động đặt ngay, mà gửi thông báo chi tiết về Telegram kèm 2 nút bấm:
+     `[✅ Xác nhận ĐẶT LỆNH THẬT]` và `[❌ Hủy bỏ]`.
+   - Chỉ khi Admin bấm nút xác nhận, lệnh mới được đẩy lên sàn HOSE qua DNSE OpenAPI.
+3. Chế độ LIVE_AUTO (Tự động hoàn toàn - Full-Auto):
+   - Chế độ tự động 100%. Khi các chỉ báo kỹ thuật hội tụ đủ điều kiện mua/bán và vượt qua tất cả các hàng rào quản trị rủi ro, bot sẽ tự động gửi lệnh thật lên sàn HOSE ngay lập tức.
+
+2.3. BỘ LỌC THỊ TRƯỜNG VN-INDEX (MARKET REGIME GATE)
+--------------------------------------------------------------------------------
+- Bot tự động theo dõi chỉ số chung VN-Index qua nến 1D và 15m để đánh giá bối cảnh thị trường theo 3 trạng thái:
+  + BULLISH (Thị trường thuận lợi): Giá >= EMA21 và RSI >= 48.
+    -> Trạng thái mở: Cho phép mở các vị thế mua mới.
+  + SIDEWAYS (Thị trường tích lũy / Giằng co):
+    -> Giao dịch có chọn lọc.
+  + BEARISH (Thị trường rủi ro / Xu hướng giảm): Giá < EMA50 hoặc (Giá < EMA21 kết hợp RSI < 45).
+    -> TỰ ĐỘNG KHÓA MUA (Market Gate Active): Bot tự động chặn 100% tất cả các lệnh mở mua mới (cả Paper và Live) để bảo toàn vốn trước các đợt sụt giảm sâu của thị trường. Các lệnh quản lý, cắt lỗ, chốt lời cho cổ phiếu đang nắm giữ vẫn hoạt động bình thường.
+
+2.4. CHIẾN LƯỢC ĐA KHUNG THỜI GIAN (1D TREND + 15M TIMING TRIGGER)
+--------------------------------------------------------------------------------
+Hệ thống kết hợp dữ liệu Khung Ngày (1D) để nhìn xu hướng lớn và Khung 15 Phút (15m) để tối ưu điểm vào:
+- Chiến lược A (Trend Breakout - Bứt phá đà tăng):
+  + 1D: Giá nằm trên EMA21 và EMA50, MACD dương, Khối lượng giao dịch >= 1.3 lần trung bình 20 phiên.
+  + 15m: Nến 15m xanh xác nhận bứt phá kháng cự, dòng tiền vào mạnh. Tự động hủy nếu nến 15m bị xả lớn.
+- Chiến lược B (Pullback - Bắt nhịp điều chỉnh trong xu hướng tăng):
+  + 1D: Cổ phiếu nằm trong xu hướng tăng trung và dài hạn (Giá > EMA50 hoặc EMA200).
+  + 15m: Giá điều chỉnh về vùng hỗ trợ (đường EMA21 hoặc dải dưới Bollinger Bands), RSI hạ nhiệt về 30-45 và xuất hiện nến đảo chiều rút chân.
+
+2.5. QUẢN TRỊ RỦI RO DANH MỤC & PHÂN BỔ VỐN
+--------------------------------------------------------------------------------
+Hệ thống áp dụng các quy chuẩn quản trị vốn chuyên nghiệp:
+- Quy mô danh mục tối đa: Tối đa nắm giữ 4 mã cổ phiếu đồng thời (tránh phân tán vốn quá nhỏ).
+- Trần phơi nhiễm danh mục (Exposure Cap): Tổng giá trị cổ phiếu nắm giữ tối đa 85% NAV (luôn dự trữ tối thiểu 15% tiền mặt an toàn).
+- Quản trị rủi ro tập trung ngành (Sector Concentration Limit):
+  + Toàn bộ 30 mã VN30 được phân vào 12 nhóm ngành chuẩn ICB rõ ràng.
+  + Giới hạn: Tối đa 2 mã cổ phiếu cùng một nhóm ngành trong danh mục 4 slot (loại bỏ triệt để nguy cơ ôm cả 4 mã Ngân hàng).
+  + Nếu một ngành đã có đủ 2 mã, bot sẽ tự động bỏ qua tín hiệu mới của ngành đó để ưu tiên mở vị thế cho ngành tiềm năng khác.
+- Phân bổ vốn 2 Lớp (2-Layer Position Sizing):
+  + Lớp 1 (Rủi ro biến động ATR): Tính khối lượng sao cho mức thua lỗ nếu chạm Stop Loss chỉ chiếm 1.5% NAV:
+    Qty_Risk = (NAV * 1.5%) / (1.5 * ATR).
+  + Lớp 2 (Trần cứng 25% NAV): Giới hạn mỗi mã tối đa chiếm 25% tổng tài sản:
+    Qty_Cap = (NAV * 25%) / Thị_Giá.
+  + Khối lượng vào lệnh thực tế: Final_Qty = min(Qty_Risk, Qty_Cap).
+- Cam kết Tuyệt đối Không Margin (Cash-Only):
+  + Bot không bao giờ vay margin, sức mua bị chặn cứng bởi tiền mặt khả dụng. Lệnh thật gửi lên DNSE luôn chọn gói tài khoản thường (type = "N").
+
+2.6. CHỐT LỜI 2 GIAI ĐOẠN & DỪNG LỖ ĐỘNG THEO ATR
+--------------------------------------------------------------------------------
+- Cắt lỗ thích ứng (Dynamic Stop Loss):
+  Tự động co giãn theo 1.5 x ATR của từng cổ phiếu (nằm trong khoảng an toàn từ -3.5% đến -6.5%).
+- Chốt lời 2 giai đoạn (2-Step Partial Take Profit):
+  + Giai đoạn 1 (Chốt TP1): Khi vị thế đạt mức lãi mục tiêu 1 (+5.0% đến +7.0% tùy biến động), bot tự động bán 50% khối lượng (tuân thủ lô chẵn/lô lẻ HOSE) để thu tiền về két.
+  + Giai đoạn 2 (Bảo toàn vốn & Gồng lãi lớn):
+    * 50% khối lượng còn lại lập tức được kích hoạt điểm dừng lỗ Hòa Vốn (Breakeven - bán ra nếu giá quay đầu giảm về đúng giá vốn mua ban đầu).
+    * Đồng thời kích hoạt Trailing Stop động (bảo vệ đỉnh từ 2.0% đến 3.5% từ đỉnh cao nhất) hoặc giữ đến khi chạm Target 2 (+8.0% đến +12.0%) để ăn trọn con sóng dài.
+
+2.7. CƠ CHẾ CẦU DAO TỰ NGẮT & HỦY LỆNH TREO QUÁ HẠN
+--------------------------------------------------------------------------------
+- Cầu dao tự ngắt theo Drawdown (Circuit Breaker):
+  Hệ thống tự động kích hoạt Cầu Dao Khẩn Cấp (Emergency Kill Switch), hủy lệnh chờ trên sàn HOSE, khóa hệ thống về chế độ READ_ONLY và phát chuông báo động đỏ trên Telegram khi:
+  + Mức sụt giảm tài sản trong ngày (Daily Drawdown) <= -3.0% NAV.
+  + Mức sụt giảm tài sản trong tuần (Weekly Drawdown) <= -7.0% NAV.
+  -> Khi cầu dao ngắt, Admin bắt buộc phải đánh giá lại thị trường và gửi lệnh `/resume` thì bot mới mở khóa hoạt động trở lại.
+- Tự động hủy lệnh treo quá hạn (Auto-Cancel Stale LO Orders):
+  Khi đặt lệnh mua/bán giới hạn (LO) lên sàn, nếu sau 15 phút lệnh chưa khớp do thị giá chạy xa, bot sẽ tự động gửi yêu cầu hủy lệnh lên sàn DNSE để giải phóng sức mua, tránh việc bị khớp bất ngờ vào cuối phiên khi xu hướng đã đảo chiều.
+
+2.8. BỘ PHÂN TÍCH TIN TỨC CẢM TÍNH & THOÁT HIỂM KHỦNG HOẢNG
+--------------------------------------------------------------------------------
+- Cào tin tức tự động: Thu thập tin liên tục từ 2 trang báo tài chính lớn CafeF và Vietstock bằng Async HTTPX tốc độ cao.
+- Xử lý ngôn ngữ tự nhiên Tiếng Việt chuyên sâu:
+  + Nhận diện các từ khóa tài chính chuyên sâu (lợi nhuận, tăng trưởng, phá sản, điều tra...).
+  + Tự động xử lý tiền tố phủ định trong câu ("không thua lỗ", "chưa giảm", "bác bỏ tin đồn bị khởi tố"...), triệt tiêu hoàn toàn nguy cơ hiểu nhầm ngữ nghĩa tích cực thành tiêu cực.
+- Cơ chế phối hợp Tín hiệu (News Combo):
+  + Chặn mua (Veto): Dù phân tích kỹ thuật báo mua, nhưng nếu mã có tin tức tiêu cực (Sentiment <= -0.25), bot tự động hủy lệnh mua để bảo vệ vốn.
+  + Tăng tự tin (Boost): Nếu mã có tin tức hỗ trợ tích cực (Sentiment >= +0.25), bot cộng thêm +0.15 điểm tin cậy cho tín hiệu.
+- Thoát hiểm khẩn cấp khi gặp Khủng hoảng (Crisis Exit):
+  Khi phát hiện tin tức đặc biệt nghiêm trọng ("khởi tố", "bắt tạm giam", "thanh tra sai phạm", "đình chỉ giao dịch", "vỡ nợ"...), bot lập tức kích hoạt bán sạch 100% vị thế của mã đó (nếu đã qua T+2) mà không cần chờ chạm ngưỡng cắt lỗ, đồng thời phát còi báo động khẩn cấp màu đỏ trên Telegram.
+
+2.9. ĐỘNG CƠ SỰ KIỆN DOANH NGHIỆP & NGÀY GIAO DỊCH KHÔNG HƯỞNG QUYỀN (GDKHQ)
+--------------------------------------------------------------------------------
+- Tự động cào dữ liệu sự kiện: Cổ tức tiền mặt, Cổ tức cổ phiếu, Chia tách, Phát hành thêm, ESOP...
+- Tự động Chặn Mua vào ngày GDKHQ (Ex-Date Buy Lockout):
+  Vào ngày GDKHQ, giá cổ phiếu bị điều chỉnh giảm kỹ thuật. Bot tự động cấm mở mua mã đó để tránh rủi ro biến động giá và tránh bị kẹp vốn chờ cổ tức.
+- Tự động Điều chỉnh Kỹ thuật Vị thế Đang Nắm Giữ (Technical Position Adjustment):
+  Khi cổ phiếu bạn đang nắm giữ bước vào ngày GDKHQ:
+  + Bot tự động tính lại khối lượng theo chuẩn VSD/HOSE (cắt cụt phần lẻ, không tạo số lượng ảo).
+  + Tự động hạ giá vốn bình quân và hạ đỉnh trailing stop tương ứng với tỷ lệ điều chỉnh giá tham chiếu.
+  -> Ngăn ngừa 100% rủi ro bị KÍCH HOẠT CẮT LỖ OAN UỔNG do thị giá bị giảm kỹ thuật.
+- Đối chiếu vị thế sàn DNSE (Live Position Reconciliation):
+  + Chạy định kỳ (mỗi 30 phút vào ngày có sự kiện quyền, mỗi 60 phút ngày thường).
+  + Lệnh thủ công `/reconcile` (hoặc `/doichieu`): So sánh số lượng và giá vốn nội bộ với dữ liệu chính thức từ sàn DNSE. Nếu phát hiện lệch, bot ưu tiên đồng bộ theo số liệu DNSE.
+
+
+================================================================================
+PHẦN 3: BẢNG TRA CỨU TOÀN BỘ LỆNH TELEGRAM VÀ BÀN PHÍM THAO TÁC
+================================================================================
+
+3.1. CÁC NÚT BẤM TRÊN BÀN PHÍM NHANH (REPLY KEYBOARD)
+--------------------------------------------------------------------------------
+Khi mở Telegram, bạn sẽ thấy bàn phím gồm 12 nút bấm tiện lợi:
++ [💼 Tài khoản Giả lập]: Mở Dashboard tài khoản Paper Trading (vốn, tiền, PnL, danh mục).
++ [🎯 Tín hiệu VN30]    : Xem danh sách các cổ phiếu VN30 đang có tín hiệu Mua kỹ thuật.
++ [💰 Số dư]             : Tra cứu số dư tiền mặt tài khoản thật trên DNSE.
++ [📊 Vị thế]            : Tra cứu danh mục cổ phiếu thật đang nắm giữ tại DNSE.
++ [📊 Hiệu suất PnL]     : Xem báo cáo phân tích hiệu suất đầu tư, tỷ lệ thắng (Win Rate), Drawdown.
++ [📋 Sổ lệnh Thật]      : Xem danh sách các lệnh đặt thật trong ngày trên sàn DNSE.
++ [🔍 Quét VN30]         : Quét phân tích toàn bộ 30 mã VN30 (tín hiệu, quá mua, quá bán).
++ [📈 Bảng giá VN30]     : Xem bảng giá tổng hợp và top tăng/giảm mạnh nhất rổ VN30.
++ [📰 Tin tức]           : Xem điểm tin chứng khoán mới nhất từ CafeF & Vietstock kèm điểm tâm lý.
++ [⚙️ Chế độ GD]         : Xem và chuyển đổi giữa 3 chế độ (Paper, Live Confirm, Live Auto).
++ [🛑 CẦU DAO KHẨN CẤP]  : Ngắt cầu dao tức thì, hủy toàn bộ lệnh trên sàn và khóa hệ thống.
++ [ℹ️ Trạng thái]        : Xem trạng thái kết nối DNSE, chỉ số VN-Index, bộ lọc thị trường.
+
+3.2. NHÓM LỆNH QUẢN TRỊ HỆ THỐNG & CẤU HÌNH
+--------------------------------------------------------------------------------
+1. `/start` hoặc `/help`
+   - Chức năng: Hiển thị lời chào, hướng dẫn sử dụng và bật bàn phím thao tác nhanh.
+2. `/status`
+   - Chức năng: Xem tổng quan trạng thái hệ thống: tình trạng kết nối DNSE, độ trễ mạng (latency ms), trạng thái thị trường VN-Index (Bullish/Sideways/Bearish), bộ lọc mua (Cho phép / Chặn mua), phiên giao dịch HOSE và chế độ hoạt động.
+3. `/mode`
+   - Chức năng: Xem chế độ giao dịch hiện tại và hiển thị menu chọn chế độ.
+   - Cú pháp đổi nhanh:
+     + `/mode paper`        : Chuyển sang chế độ Giao dịch Giả lập (An toàn 100%).
+     + `/mode live_confirm` : Chuyển sang chế độ Bán tự động (Duyệt lệnh trước khi đặt).
+     + `/mode live_auto`    : Chuyển sang chế độ Tự động hoàn toàn (Full Auto tiền thật).
+4. `/kill_switch`
+   - Chức năng: CẦU DAO KHẨN CẤP. Lập tức gửi lệnh hủy tất cả các lệnh đang chờ khớp trên sàn HOSE và khóa bot về chế độ chỉ đọc (READ_ONLY). Chặn đứng mọi hành vi đặt lệnh mới.
+5. `/resume`
+   - Chức năng: Mở khóa hệ thống sau khi đã ngắt cầu dao khẩn cấp, đưa bot trở lại hoạt động bình thường.
+6. `/sync` (hoặc nút bấm 🔄 Làm mới)
+   - Chức năng: Buộc bot kết nối lại và đồng bộ tức thì số dư, vị thế mới nhất từ DNSE.
+
+3.3. NHÓM LỆNH TRA CỨU TÀI KHOẢN & SÀN DNSE
+--------------------------------------------------------------------------------
+1. `/balance`
+   - Chức năng: Tra cứu số dư tiền mặt khả dụng, tổng tiền mặt, dư nợ margin của tài khoản thật tại DNSE.
+2. `/portfolio` (hoặc `/positions`)
+   - Chức năng: Tra cứu danh mục cổ phiếu thật đang nắm giữ tại DNSE: số lượng, giá vốn, thị giá hiện tại, lãi/lỗ tạm tính từng mã và tổng lãi/lỗ danh mục.
+3. `/reconcile` (hoặc `/doichieu`)
+   - Chức năng: Đối chiếu chi tiết từng mã cổ phiếu giữa hệ thống nội bộ và dữ liệu thực tế tại sàn DNSE. Hiển thị rõ số lượng, giá vốn và trạng thái khớp lệnh.
+4. `/orders_live`
+   - Chức năng: Tra cứu danh sách các lệnh thật đã đặt trong ngày tại DNSE (mã lệnh, chiều mua/bán, khối lượng, giá đặt, trạng thái đã khớp hay đang chờ).
+5. `/cancel_live <MÃ_LỆNH>`
+   - Chức năng: Gửi yêu cầu hủy một lệnh thật đang chờ khớp trên sàn HOSE.
+   - Ví dụ: `/cancel_live 12345678`
+
+3.4. NHÓM LỆNH THỊ TRƯỜNG, CHỈ BÁO & NHÓM NGÀNH VN30
+--------------------------------------------------------------------------------
+1. `/market` (hoặc `/vnindex`)
+   - Chức năng: Xem phân tích chi tiết chỉ số VN-Index (điểm số, biến động %, các đường EMA9, EMA21, EMA50, EMA200, RSI, MACD) và trạng thái bộ lọc giải ngân (BULLISH/SIDEWAYS/BEARISH).
+2. `/scan`
+   - Chức năng: Quét toàn bộ 30 mã VN30 để tìm các cổ phiếu đang có tín hiệu Mua bứt phá (Breakout), Mua điều chỉnh (Pullback), hoặc trạng thái Quá bán (RSI < 30) / Quá mua (RSI > 70).
+3. `/vn30`
+   - Chức năng: Xem danh sách 30 mã cổ phiếu rổ VN30, tỷ lệ tăng giảm giá và top mã tăng/giảm mạnh nhất trong phiên.
+4. `/quote <MÃ>` (hoặc `/q <MÃ>`)
+   - Chức năng: Xem thông tin giá khớp mới nhất, giá Mở/Cao/Thấp, khối lượng giao dịch và tỷ lệ so với trung bình 20 phiên của mã cổ phiếu.
+   - Ví dụ: `/quote FPT` hoặc `/q HPG`
+5. `/indicators <MÃ>` (hoặc `/i <MÃ>`)
+   - Chức năng: Xem bảng chỉ báo kỹ thuật chuyên sâu của mã cổ phiếu: Xu hướng (Uptrend/Downtrend), EMA 9/21/50, RSI 14 phiên, MACD & Histogram, Bollinger Bands, ATR (độ biến động giá).
+   - Ví dụ: `/indicators VCB` hoặc `/i MWG`
+6. `/sectors` (hoặc `/nganh`)
+   - Chức năng: Hiển thị bảng phân loại 12 nhóm ngành chuẩn ICB cho 30 mã VN30, số lượng mã đang nắm giữ trong từng ngành và trạng thái giới hạn (ví dụ: `[1/2]` hoặc cảnh báo `🛑 [ĐẦY 2/2]`).
+
+3.5. NHÓM LỆNH TIN TỨC & SỰ KIỆN DOANH NGHIỆP
+--------------------------------------------------------------------------------
+1. `/news` (hoặc `/tin`)
+   - Chức năng: Xem top các bài báo tài chính mới nhất vừa cào từ CafeF và Vietstock, kèm điểm đánh giá cảm tính thị trường chung và cảnh báo khủng hoảng (nếu có).
+2. `/news <MÃ>`
+   - Chức năng: Lọc các bài báo liên quan riêng đến mã cổ phiếu chỉ định và hiển thị chỉ số cảm tính của mã đó (Tích cực / Tiêu cực / Trung lập).
+   - Ví dụ: `/news FPT` hoặc `/news HPG`
+3. `/events` (hoặc `/sukien`)
+   - Chức năng: Xem lịch các sự kiện doanh nghiệp và ngày GDKHQ sắp diễn ra của các công ty trong rổ VN30 (cổ tức tiền, cổ tức cổ phiếu, chia tách, phát hành thêm...).
+4. `/events <MÃ>`
+   - Chức năng: Tra cứu lịch sự kiện doanh nghiệp riêng của một mã cổ phiếu.
+   - Ví dụ: `/events MBB` hoặc `/events SSI`
+
+3.6. NHÓM LỆNH MÔ PHỎNG PAPER TRADING (GIAO DỊCH ẢO)
+--------------------------------------------------------------------------------
+1. `/paper`
+   - Chức năng: Xem Dashboard tài khoản giả lập: Vốn ban đầu (5.000.000 đ), tiền mặt khả dụng, giá trị cổ phiếu, tổng NAV, tỷ lệ phơi nhiễm (% NAV), số slot đang dùng (x/4 mã), mức drawdown ngày, lãi/lỗ đã chốt, lãi/lỗ tạm tính và chi tiết danh mục đang giữ.
+2. `/signals`
+   - Chức năng: Xem danh sách các mã cổ phiếu trong rổ VN30 đang hội tụ đủ điều kiện mua theo chiến lược Breakout hoặc Pullback trên cả 2 khung thời gian 1D + 15m.
+3. `/buy_paper <MÃ> <KHỐI_LƯỢNG> [GIÁ]`
+   - Chức năng: Đặt lệnh mua giả lập thủ công. Hỗ trợ cả Lô Chẵn (bội số 100) và Lô Lẻ (từ 1 đến 99 cổ phiếu).
+   - Tự động áp dụng mô phỏng trượt giá HOSE (+0.1%) và trừ phí giao dịch (0.15%).
+   - Cổ phiếu mua sẽ tuân thủ chu kỳ thanh toán T+2 (sau 2 phiên mới khả dụng để bán).
+   - Ví dụ:
+     + `/buy_paper FPT 15`          : Mua 15 cổ phiếu FPT theo giá thị trường hiện tại.
+     + `/buy_paper HPG 100 26500`   : Mua 100 cổ phiếu HPG với mức giá 26.500 đ.
+4. `/sell_paper <MÃ> <KHỐI_LƯỢNG> [GIÁ]`
+   - Chức năng: Đặt lệnh bán giả lập thủ công. Hệ thống tự động kiểm tra xem cổ phiếu đã về tài khoản khả dụng (đủ chu kỳ T+2) hay chưa.
+   - Tự động áp dụng trượt giá (-0.1%), trừ phí giao dịch (0.15%) và thuế bán chứng khoán (0.10%). Tiền bán được hoàn lại vào số dư khả dụng ngay lập tức.
+   - Ví dụ:
+     + `/sell_paper FPT 15`         : Bán 15 cổ phiếu FPT theo giá thị trường.
+     + `/sell_paper HPG 100 28000`  : Bán 100 cổ phiếu HPG với mức giá 28.000 đ.
+5. `/autotrade_paper`
+   - Chức năng: Xem trạng thái tự động đi lệnh giả lập (đang BẬT hay TẮT).
+   - Cú pháp:
+     + `/autotrade_paper on`  : Bật chế độ tự động đi lệnh giả lập. Khi có tín hiệu đạt chuẩn, bot tự động tính toán khối lượng theo quy tắc quản trị rủi ro và thực hiện mua/bán giả lập.
+     + `/autotrade_paper off` : Tắt chế độ tự động đi lệnh giả lập.
+6. `/reset_paper`
+   - Chức năng: Xóa toàn bộ danh mục và lịch sử giao dịch giả lập, đặt lại số dư tài khoản ảo về nguyên vẹn 5.000.000 VNĐ. Có hộp thoại xác nhận trên Telegram để tránh bấm nhầm.
+
+3.7. NHÓM LỆNH ĐẶT LỆNH THẬT TRÊN SÀN HOSE (LIVE TRADING)
+--------------------------------------------------------------------------------
+* Chú ý quan trọng: Để đặt được lệnh thật, hệ thống phải được chuyển sang chế độ `/mode live_confirm` hoặc `/mode live_auto`.
+
+1. `/buy_live <MÃ> <KHỐI_LƯỢNG> [GIÁ]`
+   - Chức năng: Đặt lệnh mua thật lên sàn HOSE qua kết nối DNSE OpenAPI.
+   - Kiểm tra các lớp bảo vệ: Giá không được lệch trần/sàn quá +/-7%, tổng giá trị lệnh <= 5.000.000 đ, số lệnh trong ngày <= 5 lệnh, không vượt quá 2 mã cùng ngành.
+   - Hành vi theo chế độ:
+     + Nếu ở chế độ `LIVE_CONFIRM`: Bot gửi bảng xác nhận lên Telegram có nút `[✅ Xác nhận ĐẶT LỆNH THẬT]`. Bạn bấm duyệt thì lệnh mới được gửi lên sàn.
+     + Nếu ở chế độ `LIVE_AUTO`: Bot gửi thẳng lệnh lên sàn HOSE và trả về mã lệnh DNSE.
+   - Ví dụ:
+     + `/buy_live HPG 100 26000`
+     + `/buy_live SSI 100` (Tự động lấy thị giá hiện tại)
+2. `/sell_live <MÃ> <KHỐI_LƯỢNG> [GIÁ]`
+   - Chức năng: Đặt lệnh bán thật lên sàn HOSE qua kết nối DNSE OpenAPI.
+   - Kiểm tra cổ phiếu thực tế có sẵn trên tài khoản DNSE để bán.
+   - Ví dụ:
+     + `/sell_live HPG 100 28000`
+3. `/orders_live`
+   - Chức năng: Tra cứu sổ lệnh thật trong ngày từ DNSE.
+4. `/cancel_live <MÃ_LỆNH>`
+   - Chức năng: Gửi yêu cầu hủy lệnh thật đang chờ khớp.
+
+3.8. NHÓM LỆNH BÁO CÁO HIỆU SUẤT ĐẦU TƯ (PNL ANALYTICS)
+--------------------------------------------------------------------------------
+1. `/pnl` (hoặc `/performance`, hoặc nút bấm [📊 Hiệu suất PnL])
+   - Chức năng: Hiển thị bảng tổng kết hiệu suất đầu tư toàn diện:
+     + Tổng tài sản (NAV) và Vốn ban đầu.
+     + Tỷ lệ phơi nhiễm danh mục (% NAV) so với trần 85%.
+     + Lãi/Lỗ đã chốt (Realized PnL) và Lãi/Lỗ tạm tính (Unrealized PnL).
+     + Tỷ lệ thắng (Win Rate %): Số lệnh thắng / Tổng số lệnh đã chốt.
+     + Thống kê số lệnh Thắng 🟢 / Thua 🔴 / Hòa ⚪.
+     + Hệ số Lợi nhuận (Profit Factor).
+     + Lệnh lãi lớn nhất và Lệnh lỗ nặng nhất.
+     + Mức sụt giảm tài sản (Drawdown) trong ngày và trong tuần so với ngưỡng Cầu dao ngắt tự động (-3% ngày / -7% tuần).
+
+
+================================================================================
+PHẦN 4: HƯỚNG DẪN THỰC HÀNH THEO CÁC KỊCH BẢN THỰC TẾ
+================================================================================
+
+4.1. KỊCH BẢN 1: NGƯỜI MỚI BẮT ĐẦU LÀM QUEN VỚI PAPER TRADING
+--------------------------------------------------------------------------------
+Bước 1: Khởi động bot bằng cách nhấp đúp file `run_bot.bat`.
+Bước 2: Mở Telegram, gửi tin nhắn `/start`. Bàn phím nhanh sẽ xuất hiện.
+Bước 3: Bấm nút `[💼 Tài khoản Giả lập]` để kiểm tra số dư ban đầu (5.000.000 đ).
+Bước 4: Bấm nút `[🔍 Quét VN30]` hoặc `[🎯 Tín hiệu VN30]` để xem các cổ phiếu đang có điểm mua đẹp.
+Bước 5: Thử đặt mua giả lập một mã có thị giá cao bằng lô lẻ (ví dụ 15 cổ phiếu FPT):
+        Gõ: `/buy_paper FPT 15`
+Bước 6: Bấm lại nút `[💼 Tài khoản Giả lập]`. Bạn sẽ thấy FPT xuất hiện trong danh mục với khối lượng 15 cp, giá vốn, giá thị trường và trạng thái khả dụng là 0 cp (chờ T+2).
+Bước 7: Sau 2 ngày làm việc (khi cổ phiếu đã khả dụng T+2), nếu muốn bán chốt lời:
+        Gõ: `/sell_paper FPT 15`
+Bước 8: Bấm `[📊 Hiệu suất PnL]` để xem tỷ lệ lãi lỗ và tỷ lệ thắng.
+
+4.2. KỊCH BẢN 2: BẬT CHẾ ĐỘ AUTO-TRADE TỰ ĐỘNG ĐI LỆNH GIẢ LẬP
+--------------------------------------------------------------------------------
+Nếu bạn bận rộn và muốn bot tự động tìm kiếm cơ hội, tính toán khối lượng theo biến động ATR và tự động mua/bán giả lập:
+Bước 1: Trên Telegram, gõ lệnh:
+        `/autotrade_paper on`
+Bước 2: Bot sẽ phản hồi: `🤖 Chế độ Auto-Trade Giả lập: 🟢 ĐÃ BẬT`.
+Bước 3: Định kỳ trong phiên giao dịch, bot sẽ:
+        - Quét nến 1D và 15m.
+        - Kiểm tra bộ lọc VN-Index (chỉ mua khi thị trường không downtrend).
+        - Kiểm tra tin tức CafeF/Vietstock (chặn mua nếu có tin xấu).
+        - Kiểm tra sự kiện GDKHQ (chặn mua nếu cổ phiếu sắp chốt quyền).
+        - Kiểm tra danh mục: Chưa đủ 4 mã, chưa vượt 2 mã cùng ngành, chưa vượt 85% NAV.
+        - Tự động đi lệnh mua giả lập và gửi thông báo về Telegram.
+        - Tự động quản lý chốt lời TP1 (50% vol), gồng lãi TP2 theo Trailing Stop và cắt lỗ SL nếu chạm ngưỡng.
+Bước 4: Để tắt chế độ này, gõ:
+        `/autotrade_paper off`
+
+4.3. KỊCH BẢN 3: GIAO DỊCH TIỀN THẬT BÁN TỰ ĐỘNG (LIVE CONFIRM)
+--------------------------------------------------------------------------------
+Khi bạn đã kiểm thử thành thạo Paper Trading và muốn bắt đầu giao dịch bằng tài khoản chứng khoán thật tại DNSE:
+Bước 1: Kiểm tra số dư tiền mặt tài khoản thật bằng cách bấm nút `[💰 Số dư]`.
+Bước 2: Chuyển sang chế độ Bán tự động:
+        Gõ: `/mode live_confirm`
+Bước 3: Khi có tín hiệu mua đạt chuẩn từ bot (hoặc khi bạn chủ động gõ lệnh mua `/buy_live HPG 100 26000`):
+        - Bot sẽ KHÔNG đẩy lệnh lên sàn ngay lập tức.
+        - Bot gửi một thông báo xác nhận về Telegram kèm thông tin chi tiết: Mã cổ phiếu, Khối lượng, Giá đặt, Tổng tiền.
+        - Bên dưới thông báo có nút: `[✅ Xác nhận ĐẶT LỆNH THẬT]` và `[❌ Hủy bỏ]`.
+Bước 4: Bạn kiểm tra lại bảng giá:
+        - Nếu đồng ý mua: Bấm `[✅ Xác nhận ĐẶT LỆNH THẬT]`. Lệnh sẽ được đẩy lên sàn HOSE ngay lập tức.
+        - Nếu không muốn mua: Bấm `[❌ Hủy bỏ]`.
+Bước 5: Bấm `[📋 Sổ lệnh Thật]` để theo dõi tiến độ khớp lệnh.
+
+4.4. KỊCH BẢN 4: XỬ LÝ TÌNH HUỐNG KHẨN CẤP
+--------------------------------------------------------------------------------
+Tình huống: Thị trường xuất hiện tin tức thiên nga đen bất ngờ (chiến tranh, sụp đổ hệ thống tài chính...) hoặc bạn muốn dừng toàn bộ hoạt động giao dịch ngay lập tức:
+Bước 1: Bấm ngay nút `[🛑 CẦU DAO KHẨN CẤP]` trên bàn phím Telegram (hoặc gõ lệnh `/kill_switch`).
+Bước 2: Hệ thống sẽ lập tức:
+        - Gửi lệnh hủy tất cả các lệnh đang chờ khớp trên sàn DNSE.
+        - Khóa cứng trạng thái bot về `READ_ONLY`.
+        - Từ chối tiếp nhận mọi lệnh mua/bán mới.
+Bước 3: Khi thị trường đã ổn định trở lại và bạn muốn mở lại hệ thống:
+        Gõ lệnh: `/resume`
+        Bot sẽ mở khóa và chuyển về chế độ hoạt động bình thường.
+
+4.5. KỊCH BẢN 5: ĐỐI CHIẾU VỊ THẾ VÀ SỰ KIỆN CỔ TỨC NGÀY GDKHQ
+--------------------------------------------------------------------------------
+Bước 1: Hàng ngày, gõ `/events` để xem các sự kiện quyền sắp diễn ra của rổ VN30.
+Bước 2: Nếu một mã bạn đang giữ có ngày GDKHQ (ví dụ: trả cổ tức cổ phiếu 15%):
+        - Bot sẽ tự động cảnh báo sớm T-1 trên Telegram.
+        - Vào đúng ngày GDKHQ, bot tự động tính toán lại khối lượng mới, hạ giá vốn bình quân và hạ các mốc Stop Loss / Take Profit để khớp với thị giá tham chiếu mới.
+        - Bạn không cần can thiệp thủ công, tránh được việc bị cắt lỗ oan.
+Bước 3: Bạn có thể chủ động kiểm tra đối chiếu dữ liệu với tài khoản sàn bất kỳ lúc nào bằng cách gõ:
+        `/reconcile` (hoặc `/doichieu`)
+        Bot sẽ hiển thị bảng so khớp số lượng và giá vốn nội bộ với dữ liệu DNSE.
+
+
+================================================================================
+PHẦN 5: LÝ DO LỆNH BỊ TỪ CHỐI & CÁCH XỬ LÝ
+================================================================================
+
+Trong quá trình sử dụng, nếu bạn đặt lệnh (hoặc Auto-Trader muốn mở vị thế) nhưng bị bot từ chối, hãy đối chiếu với bảng nguyên nhân sau:
+
+1. "LỆNH BỊ TỪ CHỐI BỞI BỘ LỌC THỊ TRƯỜNG (VN-INDEX BEARISH)"
+   - Nguyên nhân: Chỉ số VN-Index đang nằm trong xu hướng giảm (Close < EMA50 hoặc Close < EMA21 kết hợp RSI < 45).
+   - Biện pháp: Bot tự động bảo vệ vốn của bạn. Hãy kiên nhẫn chờ thị trường chung phục hồi về trạng thái SIDEWAYS hoặc BULLISH.
+
+2. "LỆNH BỊ TỪ CHỐI BỞI QUẢN TRỊ RỦI RO NGÀNH (TỐI ĐA 2 MÃ/NGÀNH)"
+   - Nguyên nhân: Trong danh mục đã có đủ 2 cổ phiếu thuộc cùng nhóm ngành đó (ví dụ bạn đã nắm giữ VCB và TCB, bot sẽ từ chối mở mua thêm MBB hay VPB).
+   - Biện pháp: Chọn cổ phiếu thuộc nhóm ngành khác (ví dụ: FPT thuộc Công nghệ, HPG thuộc Thép, MWG thuộc Bán lẻ...).
+
+3. "VỊ THẾ DANH MỤC ĐÃ ĐẦY (4/4 MÃ)"
+   - Nguyên nhân: Danh mục đã đạt giới hạn tối đa 4 cổ phiếu đang nắm giữ.
+   - Biện pháp: Chờ chốt lời hoặc bán bớt cổ phiếu đang giữ trước khi mở mã mới.
+
+4. "CHẠM TRẦN PHƠI NHIỄM DANH MỤC (85% NAV)"
+   - Nguyên nhân: Tổng giá trị các cổ phiếu đã chiếm gần 85% NAV, số tiền mặt còn lại cần được giữ lại làm đệm an toàn.
+   - Biện pháp: Co hẹp khối lượng mua hoặc chờ giải phóng dòng tiền từ các vị thế cũ.
+
+5. "CỔ PHIẾU CÓ TIN TỨC TIÊU CỰC HOẶC KHỦNG HOẢNG"
+   - Nguyên nhân: Mã cổ phiếu vừa xuất hiện bài báo tiêu cực trên CafeF/Vietstock với điểm cảm tính <= -0.25, hoặc dính từ khóa khủng hoảng pháp lý.
+   - Biện pháp: Tôn trọng nguyên tắc quản trị rủi ro thông tin của bot để tránh rơi vào bẫy giá rơi tự do.
+
+6. "NGÀY GIAO DỊCH KHÔNG HƯỞNG QUYỀN (EX-DATE BUY LOCKOUT)"
+   - Nguyên nhân: Hôm nay là ngày GDKHQ của mã cổ phiếu này.
+   - Biện pháp: Chờ qua ngày GDKHQ để thị giá và quyền lợi ổn định mới tham gia giao dịch.
+
+7. "VƯỢT QUÁ BIÊN ĐỘ TRẦN/SÀN HOSE (+/- 7%)"
+   - Nguyên nhân: Mức giá bạn nhập vào lệnh mua/bán thật vượt ra ngoài phạm vi giá trần hoặc giá sàn cho phép trong ngày.
+   - Biện pháp: Kiểm tra lại bảng giá trực tuyến và đặt mức giá nằm trong biên độ cho phép.
+
+8. "CỔ PHIẾU CHƯA KHẢ DỤNG ĐỂ BÁN (CHƯA VỀ T+2)"
+   - Nguyên nhân: Bạn vừa mua cổ phiếu giả lập hoặc mua thật chưa đủ 2 ngày làm việc theo quy định thanh toán của thị trường chứng khoán Việt Nam.
+   - Biện pháp: Chờ cổ phiếu về tài khoản khả dụng rồi mới thực hiện lệnh bán.
+
+
+================================================================================
+PHẦN 6: KHẮC PHỤC SỰ CỐ THƯỜNG GẶP (TROUBLESHOOTING)
+================================================================================
+
+1. Bot không phản hồi tin nhắn trên Telegram:
+   - Kiểm tra xem cửa sổ dòng lệnh chạy bot (cmd/run_bot.bat) có đang mở và không bị báo lỗi hay không.
+   - Kiểm tra xem Chat ID tài khoản Telegram của bạn có đúng với `TELEGRAM_CHAT_ID` trong file `.env` không (bảo mật Whitelist sẽ bỏ qua tin nhắn nếu sai ID).
+   - Kiểm tra `TELEGRAM_BOT_TOKEN` trong `.env` xem có bị copy thiếu ký tự nào không.
+
+2. Báo lỗi kết nối DNSE OpenAPI ("Failed initial DNSE connection"):
+   - Kiểm tra `DNSE_API_KEY` và `DNSE_API_SECRET` trong file `.env` đã chính xác chưa.
+   - Kiểm tra ngày giờ hệ thống trên máy tính Windows của bạn: Giờ hệ thống bắt buộc phải chuẩn xác từng giây (đồng bộ qua Windows Time Sync), vì chữ ký bảo mật HMAC-SHA256 yêu cầu timestamp không bị lệch quá 30 giây.
+   - Nếu chưa có tài khoản DNSE nhưng vẫn muốn trải nghiệm bot: Đặt `DRY_RUN=true` trong file `.env` để chạy ở chế độ giả lập Mock Client.
+
+3. Lỗi cơ sở dữ liệu SQLite ("database is locked"):
+   - Hệ thống từ phiên bản v0.8.0 đã được trang bị cơ chế SQLite WAL Mode Concurrency (`PRAGMA journal_mode=WAL`), ngăn ngừa triệt để lỗi khóa database khi chạy đa luồng.
+   - Nếu vẫn gặp sự cố, đảm bảo bạn không mở file `storage/bot.db` bằng một phần mềm bên ngoài (như DB Browser for SQLite) ở chế độ ghi đè khi bot đang chạy.
+
+4. Xem log chi tiết ở đâu khi bot gặp lỗi?
+   - Toàn bộ nhật ký hoạt động được ghi lại chi tiết theo thời gian thực tại file:
+     `d:\TradingBot\logs\tradingbot.log`
+   - File log hỗ trợ xoay vòng tự động (Rotating File Handler), kích thước tối đa 10MB/file. Bạn có thể mở file này bằng Notepad để xem chi tiết mọi thông báo lỗi và luồng xử lý.
+
+
+================================================================================
+PHẦN 7: NGUYÊN TẮC BẢO MẬT VỐN & LỜI KHUYÊN ĐẦU TƯ
+================================================================================
+
+1. Bảo vệ API Key và Token bí mật:
+   - Tuyệt đối không gửi file `.env`, file `storage/bot.db` hoặc chuỗi Token Telegram / DNSE API Secret cho bất kỳ ai hoặc tải lên các kho lưu trữ mã nguồn công khai (GitHub public repo).
+
+2. Khuyến nghị lộ trình làm quen với hệ thống:
+   - Tuần 1: Chạy 100% ở chế độ `PAPER` (Giả lập) kết hợp bật `/autotrade_paper on` để theo dõi cách bot phản ứng với thị trường, cách cắt lỗ và chốt lời.
+   - Tuần 2: Sử dụng chế độ `LIVE_CONFIRM` (Bán tự động tiền thật) với khối lượng nhỏ (100 cổ phiếu) để tự tay bấm duyệt lệnh, làm quen với cảm giác khớp lệnh thật trên sàn DNSE.
+   - Chỉ chuyển sang `LIVE_AUTO` khi bạn đã hoàn toàn hiểu rõ các quy tắc vào/ra lệnh của bot và tin tưởng vào kỷ luật quản trị rủi ro của hệ thống.
+
+3. Kỷ luật trong đầu tư chứng khoán:
+   - Không có bất kỳ hệ thống bot nào có tỷ lệ thắng 100%. Sức mạnh của hệ thống nằm ở:
+     + CẮT LỖ NHANH VÀ DỨT KHOÁT (khi sai chỉ mất 3.5% - 5%).
+     + GỒNG LÃI TỐI ĐA VÀ BẢO TOÀN LỢI NHUẬN (khi đúng lãi 7% - 12% nhờ chốt 2 giai đoạn và Trailing Stop).
+     + BẢO VỆ DANH MỤC TRƯỚC SÓNG GIÓ (Bộ lọc VN-Index và Quản trị ngành).
+   - Hãy để bot thực hiện đúng kỷ luật toán học mà không can thiệp bằng cảm xúc chủ quan.
+
+================================================================================
+Chúc bạn có những trải nghiệm đầu tư hiệu quả và an toàn cùng AI Auto Trading Bot!
+================================================================================

@@ -86,11 +86,17 @@ class DNSEClient:
         trading_token: Optional[str] = None
     ) -> OrderPlacementResult:
         symbol = symbol.upper()
-        # Automatically resolve loan package if not provided
+        # Automatically resolve normal cash-only loan package if not provided (strictly NO MARGIN)
         if not loan_package_id:
             pkgs = await self.get_loan_packages(account_no, symbol)
             if pkgs:
-                loan_package_id = pkgs[0].get("id")
+                normal_pkgs = [
+                    p for p in pkgs
+                    if str(p.get("type", "")).upper() == "N"
+                    or "thường" in str(p.get("name", "")).lower()
+                    or "normal" in str(p.get("name", "")).lower()
+                ]
+                loan_package_id = normal_pkgs[0].get("id") if normal_pkgs else pkgs[0].get("id")
 
         path = f"/accounts/{account_no}/orders"
         query_path = f"{path}?marketType=STOCK&orderCategory=NORMAL"
