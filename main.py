@@ -59,7 +59,7 @@ async def main():
         account_info = await client.get_accounts()
         state.set_account(account_info)
         logger.info(f"Connected to DNSE! Account: {account_info.name} ({account_info.custodyCode})")
-        sub_id = account_info.accounts[0].id
+        sub_id = state.get_sub_account_id()
         bal = await client.get_balances(sub_id)
         pos = await client.get_positions(sub_id)
         state.set_balance(bal)
@@ -76,7 +76,7 @@ async def main():
 
     # 4. Risk Safeguards & Live Trader Dispatcher
     safeguards = RiskSafeguards()
-    sub_id = state.account.accounts[0].id if (state.account and state.account.accounts) else "0001880229"
+    sub_id = state.get_sub_account_id()
     live_trader = LiveTrader(
         client=client,
         safeguards=safeguards,

@@ -103,14 +103,16 @@ async def cmd_kill_switch(message: Message, safeguards: RiskSafeguards, client: 
     reason = "Kích hoạt thủ công qua lệnh Telegram /kill_switch"
     safeguards.activate_kill_switch(reason)
 
-    account_no = state_obj.account.accounts[0].id if (state_obj.account and state_obj.account.accounts) else "0001880229"
+    account_no = state_obj.get_sub_account_id()
 
     # Attempt to cancel all open orders
     cancelled_count = 0
     try:
         orders = await client.get_orders(account_no)
+        active_statuses = {"NEW", "PENDING_NEW", "PARTIALLY_FILLED", "WAITING", "PENDING", "QUEUED", "CONFIRMED"}
         for ord in orders:
-            if ord.orderStatus in ("NEW", "PENDING_NEW", "PARTIALLY_FILLED", "WAITING", "PENDING"):
+            status = getattr(ord, "orderStatus", "") or ""
+            if status.upper() in active_statuses:
                 await client.cancel_order(account_no, ord.id)
                 cancelled_count += 1
     except Exception as e:
@@ -349,7 +351,7 @@ async def cb_cancel_live(query: CallbackQuery, live_trader: LiveTrader):
 @router.message(Command("orders_live"))
 @router.message(F.text == "📋 Sổ lệnh Thật")
 async def cmd_orders_live(message: Message, client: Any, state_obj: TradingState):
-    account_no = state_obj.account.accounts[0].id if (state_obj.account and state_obj.account.accounts) else "0001880229"
+    account_no = state_obj.get_sub_account_id()
     try:
         orders = await client.get_orders(account_no)
     except Exception as e:
@@ -382,7 +384,7 @@ async def cmd_cancel_live(message: Message, client: Any, state_obj: TradingState
         return
 
     order_id = parts[1].strip()
-    account_no = state_obj.account.accounts[0].id if (state_obj.account and state_obj.account.accounts) else "0001880229"
+    account_no = state_obj.get_sub_account_id()
     try:
         res = await client.cancel_order(account_no, order_id)
         is_ok = res.get("success", False) if isinstance(res, dict) else bool(res)

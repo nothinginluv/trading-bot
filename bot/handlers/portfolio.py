@@ -40,7 +40,7 @@ def render_positions_board(state_obj) -> str:
 async def cmd_balance(message: Message, state_obj, client, repo):
     # Fetch or use cache
     if not state_obj.is_cache_valid(ttl_seconds=15.0) and client and state_obj.account:
-        sub_id = state_obj.account.accounts[0].id
+        sub_id = state_obj.get_sub_account_id()
         bal = await client.get_balances(sub_id)
         state_obj.set_balance(bal)
         await repo.save_balance_snapshot(
@@ -53,9 +53,10 @@ async def cmd_balance(message: Message, state_obj, client, repo):
 
     s = state_obj.balance.stock
     acc = state_obj.account
+    active_sub_id = state_obj.get_sub_account_id()
     text = (
         f"👤 **Tài khoản:** {acc.name if acc else 'N/A'} (`{acc.custodyCode if acc else 'N/A'}`)\n"
-        f"🏦 **Tiểu khoản:** `{acc.accounts[0].id if acc and acc.accounts else 'N/A'}`\n"
+        f"🏦 **Tiểu khoản:** `{active_sub_id}`\n"
         "──────────────────────\n"
         f"💵 **Tiền khả dụng:** `{s.availableCash:,.0f} đ`\n"
         f"💰 **Tổng tiền mặt:** `{s.totalCash:,.0f} đ`\n"
@@ -68,7 +69,7 @@ async def cmd_balance(message: Message, state_obj, client, repo):
 @router.message(lambda msg: msg.text == "📊 Vị thế")
 async def cmd_positions(message: Message, state_obj, client):
     if not state_obj.is_cache_valid(ttl_seconds=15.0) and client and state_obj.account:
-        sub_id = state_obj.account.accounts[0].id
+        sub_id = state_obj.get_sub_account_id()
         pos = await client.get_positions(sub_id)
         state_obj.set_positions(pos)
 
@@ -80,7 +81,7 @@ async def cmd_positions(message: Message, state_obj, client):
 async def cb_pos_refresh(query: CallbackQuery, state_obj, client):
     if client and state_obj.account:
         try:
-            sub_id = state_obj.account.accounts[0].id
+            sub_id = state_obj.get_sub_account_id()
             pos = await client.get_positions(sub_id)
             state_obj.set_positions(pos)
         except Exception:
@@ -112,7 +113,7 @@ async def cmd_sync(message: Message, state_obj, client, repo):
         await message.answer("❌ Lỗi: Chưa kết nối được tài khoản DNSE.")
         return
 
-    sub_id = state_obj.account.accounts[0].id
+    sub_id = state_obj.get_sub_account_id()
     start = time.time()
     bal = await client.get_balances(sub_id)
     pos = await client.get_positions(sub_id)
@@ -190,8 +191,16 @@ async def cmd_pnl(
         f"{win_icon} **Tỷ lệ thắng (Win Rate):** `{stats['win_rate_pct']:.1f}%` ({stats['winning_trades']}/{stats['total_trades']} lệnh chốt)\n"
         f"⚖️ **Thắng / Thua / Hòa:** `{stats['winning_trades']}` 🟢 | `{stats['losing_trades']}` 🔴 | `{stats['break_even_trades']}` ⚪\n"
         f"📈 **Hệ số Lợi nhuận (Profit Factor):** `{stats['profit_factor']:.2f}`\n"
+        f"🎯 **Kỳ vọng / lệnh (Expectancy):** `{stats.get('expectancy_vnd', 0.0):+,.0f} đ`\n"
+        f"⚖️ **Tỷ lệ Lãi/Lỗ TB (Payoff Ratio):** `{stats.get('win_loss_ratio', 0.0):.2f}`\n"
         f"🏆 **Lệnh lãi cao nhất:** `{stats['best_trade']:+,.0f} đ`\n"
         f"💥 **Lệnh lỗ nặng nhất:** `{stats['worst_trade']:+,.0f} đ`\n"
+        "──────────────────────\n"
+        "🏛️ **CHỈ SỐ RỦI RO ĐỊNH LƯỢNG (INSTITUTIONAL METRICS)**\n"
+        f"• **Sharpe Ratio (Rf=5.0%):** `{stats.get('sharpe_ratio', 0.0):.2f}`\n"
+        f"• **Sortino Ratio (Downside):** `{stats.get('sortino_ratio', 0.0):.2f}`\n"
+        f"• **Calmar Ratio:** `{stats.get('calmar_ratio', 0.0):.2f}`\n"
+        f"• **Max Drawdown Lịch sử:** `{stats.get('max_drawdown_pct', 0.0):.2f}%` (`-{stats.get('max_drawdown_vnd', 0.0):,.0f} đ`)\n"
         "──────────────────────\n"
         f"📉 **Drawdown Ngày:** `{dd_day_str}` (Cầu dao: `-3.0%`)\n"
         f"📉 **Drawdown Tuần:** `{dd_week_str}` (Cầu dao: `-7.0%`)\n"
@@ -287,5 +296,64 @@ async def cmd_reconcile(
         lines.append(f"⚠️ Phát hiện {discrepancy_count} mã có sự sai lệch.")
 
     await message.answer("\n".join(lines), parse_mode="Markdown")
+
+
+@router.message(Command("stress"))
+@router.message(Command("montecarlo"))
+async def cmd_stress_test(
+    message: Message,
+    state_obj,
+    paper_engine=None,
+    paper_repo=None
+):
+    if not paper_repo or not paper_engine:
+        await message.answer("⚠️ Dịch vụ kiểm định căng thẳng chưa sẵn sàng.", parse_mode="Markdown")
+        return
+
+    current_prices = {sym: s.price for sym, s in state_obj.vn30_summaries.items()}
+    account = await paper_engine.get_account_summary(current_prices)
+
+    returns_pct = await paper_repo.get_closed_trade_returns_pct()
+
+    from strategy.stress_test import run_monte_carlo_simulation
+    mc_res = run_monte_carlo_simulation(
+        trade_returns_pct=returns_pct,
+        initial_capital=account.nav if account.nav > 0 else 10_000_000.0,
+        num_simulations=1000,
+        horizon_trades=100,
+        ruin_threshold_pct=15.0
+    )
+
+    ret_median = ((mc_res.median_final_capital - mc_res.initial_capital) / mc_res.initial_capital) * 100
+    ret_p95 = ((mc_res.p95_final_capital - mc_res.initial_capital) / mc_res.initial_capital) * 100
+    ret_p5 = ((mc_res.p5_final_capital - mc_res.initial_capital) / mc_res.initial_capital) * 100
+
+    rec_msg = (
+        "Danh mục kiểm soát rủi ro đuôi ở mức an toàn cao, không có nguy cơ vỡ nợ hệ thống."
+        if mc_res.risk_of_ruin_pct < 5.0
+        else "Cần giảm đòn bẩy hoặc quy mô vị thế do rủi ro đuôi vượt ngưỡng an toàn!"
+    )
+
+    text = (
+        f"🎲 **BÁO CÁO MÔ PHỎNG MONTE CARLO & STRESS-TEST ({mc_res.num_simulations:,} KỊCH BẢN)**\n"
+        "──────────────────────\n"
+        f"💰 **Vốn khởi điểm:** `{mc_res.initial_capital:,.0f} đ`\n"
+        f"🎯 **Tầm nhìn mô phỏng:** `{mc_res.horizon_trades}` lệnh kế tiếp\n"
+        "──────────────────────\n"
+        f"📈 **Kịch bản Lạc quan (95th %):** `{mc_res.p95_final_capital:,.0f} đ` (`{ret_p95:+.1f}%`)\n"
+        f"⚖️ **Kịch bản Kỳ vọng (Median):** `{mc_res.median_final_capital:,.0f} đ` (`{ret_median:+.1f}%`)\n"
+        f"📉 **Kịch bản Bất lợi (5th %):** `{mc_res.p5_final_capital:,.0f} đ` (`{ret_p5:+.1f}%`)\n"
+        "──────────────────────\n"
+        "🛡️ **ĐO LƯỜNG RỦI RO ĐUÔI (TAIL RISK & STRESS):**\n"
+        f"• **VaR 95% (Value at Risk):** `{mc_res.var_95_pct:.1f}% NAV`\n"
+        f"• **VaR 99% (Extreme Stress):** `{mc_res.var_99_pct:.1f}% NAV`\n"
+        f"• **CVaR 95% (Expected Shortfall):** `{mc_res.cvar_95_pct:.1f}% NAV`\n"
+        f"• **Max Drawdown Kỳ vọng:** `{mc_res.max_drawdown_p50:.1f}%`\n"
+        f"• **Max Drawdown Khủng hoảng (95th %):** `{mc_res.max_drawdown_p95:.1f}%`\n"
+        f"• **Xác suất Vi phạm ngưỡng 15% (Risk of Ruin):** `{mc_res.risk_of_ruin_pct:.1f}%`\n"
+        "──────────────────────\n"
+        f"💡 *Khuyến nghị:* {rec_msg}"
+    )
+    await message.answer(text, parse_mode="Markdown")
 
 

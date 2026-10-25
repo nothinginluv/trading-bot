@@ -1,12 +1,13 @@
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List
 import httpx
 from market.models import Candle, OHLCVSeries
 
 logger = logging.getLogger(__name__)
+VN_TZ = timezone(timedelta(hours=7))
 
 class AsyncMarketClient:
     BASE_URL = "https://services.entrade.com.vn/chart-api/v2"
@@ -46,7 +47,7 @@ class AsyncMarketClient:
                         candles = []
                         for i in range(len(t_list)):
                             t = int(t_list[i])
-                            d_str = datetime.fromtimestamp(t, timezone.utc).strftime(date_fmt)
+                            d_str = datetime.fromtimestamp(t, VN_TZ).strftime(date_fmt)
                             candles.append(Candle(
                                 timestamp=t,
                                 date_str=d_str,

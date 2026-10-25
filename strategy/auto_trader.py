@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import math
 from datetime import datetime, timedelta
@@ -6,6 +7,7 @@ from strategy.paper_engine import PaperEngine
 from strategy.models import OrderStatus, SignalType
 from strategy.signals import scan_signals
 from strategy.risk import calculate_position_size, check_exit_conditions, calculate_partial_exit_quantity
+from indicators.calculator import calculate_price_correlation, calculate_series_correlation
 from news.event_adjuster import parse_event_adjustment
 from core.state import TradingState
 from core.risk_safeguards import TradingMode
@@ -33,10 +35,22 @@ class AutoTrader:
         self.state = state
         self.notify_func = notify_func
         self.live_trader = live_trader
+        self._lock = asyncio.Lock()
 
     async def process_cycle(self) -> List[str]:
+        if self._lock.locked():
+            logger.warning("AutoTrader.process_cycle is already running, skipping concurrent tick.")
+            return []
+        async with self._lock:
+            return await self._process_cycle_impl()
+
+    async def _process_cycle_impl(self) -> List[str]:
         alerts: List[str] = []
         today_str = datetime.now().strftime("%Y-%m-%d")
+        is_live_mode = bool(
+            self.live_trader
+            and self.live_trader.safeguards.mode in (TradingMode.LIVE_CONFIRM, TradingMode.LIVE_AUTO)
+        )
         
         # 1. Settle mature T+2 tranches
         await self.engine.repo.settle_mature_tranches(today_str)
@@ -216,21 +230,21 @@ class AutoTrader:
             is_crisis, crisis_title = self.state.is_symbol_in_crisis(pos.symbol)
             if is_crisis:
                 if pos.available_quantity > 0:
-                    order = await self.engine.execute_sell(pos.symbol, pos.available_quantity, cur_price)
-                    if order.status == OrderStatus.FILLED:
-                        just_exited_symbols.add(pos.symbol)
-                        alert = (
-                            f"🚨 [KHẨN CẤP: BÁN THOÁT HÀNG DO TIN CỰC XẤU (2B)] {pos.symbol}\n"
-                            f"- Khối lượng: {order.quantity:,} cp\n"
-                            f"- Giá khớp: {cur_price:,.0f} đ\n"
-                            f"- Lý do: {crisis_title}"
-                        )
-                        alerts.append(alert)
-                        if self.notify_func:
-                            await self.notify_func(alert)
-
-                    if self.live_trader and self.live_trader.safeguards.mode in (TradingMode.LIVE_CONFIRM, TradingMode.LIVE_AUTO):
-                        await self.live_trader.route_order(
+                    if not is_live_mode:
+                        order = await self.engine.execute_sell(pos.symbol, pos.available_quantity, cur_price)
+                        if order.status == OrderStatus.FILLED:
+                            just_exited_symbols.add(pos.symbol)
+                            alert = (
+                                f"🚨 [KHẨN CẤP: BÁN THOÁT HÀNG DO TIN CỰC XẤU (2B)] {pos.symbol}\n"
+                                f"- Khối lượng: {order.quantity:,} cp\n"
+                                f"- Giá khớp: {cur_price:,.0f} đ\n"
+                                f"- Lý do: {crisis_title}"
+                            )
+                            alerts.append(alert)
+                            if self.notify_func:
+                                await self.notify_func(alert)
+                    else:
+                        live_res = await self.live_trader.route_order(
                             symbol=pos.symbol,
                             side="NS",
                             quantity=pos.available_quantity,
@@ -239,6 +253,8 @@ class AutoTrader:
                             strategy_name="CRISIS_EXIT",
                             reason=f"Tin cực xấu: {crisis_title}"
                         )
+                        if live_res.get("status") == "EXECUTED":
+                            just_exited_symbols.add(pos.symbol)
                     continue
                 else:
                     alert = (
@@ -259,31 +275,31 @@ class AutoTrader:
                         sell_qty = pos.available_quantity
 
                     if sell_qty > 0:
-                        order = await self.engine.execute_sell(pos.symbol, sell_qty, cur_price)
-                        if order.status == OrderStatus.FILLED:
-                            if decision.is_tp1:
-                                await self.engine.repo.set_position_tp1_taken(pos.symbol, True)
-                                action_tag = "CHỐT LỜI 50% (TP1)"
-                            else:
-                                just_exited_symbols.add(pos.symbol)
-                                action_tag = "BÁN TOÀN BỘ"
+                        if not is_live_mode:
+                            order = await self.engine.execute_sell(pos.symbol, sell_qty, cur_price)
+                            if order.status == OrderStatus.FILLED:
+                                if decision.is_tp1:
+                                    await self.engine.repo.set_position_tp1_taken(pos.symbol, True)
+                                    action_tag = "CHỐT LỜI 50% (TP1)"
+                                else:
+                                    just_exited_symbols.add(pos.symbol)
+                                    action_tag = "BÁN TOÀN BỘ"
 
-                            # Check if negative news accompanies technical exit -> amplify notice
-                            sym_sentiment = self.state.get_symbol_sentiment(pos.symbol)
-                            news_note = f" (Kèm tin tức xấu: {sym_sentiment:+.2f})" if sym_sentiment <= -0.25 else ""
+                                # Check if negative news accompanies technical exit -> amplify notice
+                                sym_sentiment = self.state.get_symbol_sentiment(pos.symbol)
+                                news_note = f" (Kèm tin tức xấu: {sym_sentiment:+.2f})" if sym_sentiment <= -0.25 else ""
 
-                            alert = (
-                                f"🔔 [AUTO-TRADE {action_tag} GIẢ LẬP] {pos.symbol}{news_note}\n"
-                                f"- Khối lượng: {order.quantity:,} cp\n"
-                                f"- Giá khớp: {cur_price:,.0f} đ\n"
-                                f"- Lý do: {decision.reason}"
-                            )
-                            alerts.append(alert)
-                            if self.notify_func:
-                                await self.notify_func(alert)
-
-                        if self.live_trader and self.live_trader.safeguards.mode in (TradingMode.LIVE_CONFIRM, TradingMode.LIVE_AUTO):
-                            await self.live_trader.route_order(
+                                alert = (
+                                    f"🔔 [AUTO-TRADE {action_tag} GIẢ LẬP] {pos.symbol}{news_note}\n"
+                                    f"- Khối lượng: {order.quantity:,} cp\n"
+                                    f"- Giá khớp: {cur_price:,.0f} đ\n"
+                                    f"- Lý do: {decision.reason}"
+                                )
+                                alerts.append(alert)
+                                if self.notify_func:
+                                    await self.notify_func(alert)
+                        else:
+                            live_res = await self.live_trader.route_order(
                                 symbol=pos.symbol,
                                 side="NS",
                                 quantity=sell_qty,
@@ -292,6 +308,8 @@ class AutoTrader:
                                 strategy_name=decision.exit_type.value if decision.exit_type else "EXIT",
                                 reason=decision.reason
                             )
+                            if live_res.get("status") == "EXECUTED" and not decision.is_tp1:
+                                just_exited_symbols.add(pos.symbol)
                 else:
                     alert = (
                         f"⚠️ [CẢNH BÁO VI PHẠM] {pos.symbol} thỏa mãn bán ({decision.reason})\n"
@@ -301,9 +319,15 @@ class AutoTrader:
                     if self.notify_func:
                         await self.notify_func(alert)
 
-        # 4. Auto-Trade Buy Entries (if auto_trade_enabled)
+        # 4. Auto-Trade Buy Entries (if auto_trade_enabled or live mode active)
         account = await self.engine.get_account_summary(current_prices)
-        if account.auto_trade_enabled:
+        safeguards = self.live_trader.safeguards if self.live_trader else None
+
+        auto_buy_active = account.auto_trade_enabled or is_live_mode
+        if safeguards and safeguards.is_read_only:
+            auto_buy_active = False
+
+        if auto_buy_active:
             # Market Regime Filter: Gate buys if benchmark is BEARISH
             if self.state.market_regime == "BEARISH":
                 return alerts
@@ -380,12 +404,63 @@ class AutoTrader:
                                 if self.notify_func:
                                     await self.notify_func(sec_alert)
                                 continue
+
+                        # 4.2 Cross-Asset 30-Day Rolling Correlation Gate (> 0.70)
+                        cand_series = self.state.vn30_candles.get(cand.symbol)
+                        if cand_series and len(cand_series.candles) >= 15:
+                            is_correlated = False
+                            corr_symbol = ""
+                            corr_val = 0.0
+                            for pos in active_positions:
+                                if pos.total_quantity <= 0 or pos.symbol == cand.symbol:
+                                    continue
+                                held_series = self.state.vn30_candles.get(pos.symbol)
+                                if held_series and len(held_series.candles) >= 15:
+                                    c_val = calculate_series_correlation(
+                                        cand_series, held_series, window=30
+                                    )
+                                    if c_val > 0.70:
+                                        is_correlated = True
+                                        corr_symbol = pos.symbol
+                                        corr_val = c_val
+                                        break
+                            if is_correlated:
+                                corr_alert = (
+                                    f"🛑 [TỪ CHỐI MUA DO TƯƠNG QUAN CAO] {cand.symbol}: "
+                                    f"Tương quan 30 ngày với {corr_symbol} đạt {corr_val:.2f} (> 0.70). "
+                                    f"Từ chối mở vị thế để tránh rủi ro tập trung đồng pha vào danh mục."
+                                )
+                                alerts.append(corr_alert)
+                                if self.notify_func:
+                                    await self.notify_func(corr_alert)
+                                continue
+
                         top_signal = cand
                         break
 
                     if not top_signal:
                         return alerts
                     
+                    # Determine cash and NAV for sizing:
+                    # In LIVE mode with real balance synced, use actual available cash and NAV.
+                    # Otherwise, use paper account summary.
+                    if (
+                        is_live_mode
+                        and self.state.balance
+                        and getattr(self.state.balance, "stock", None)
+                        and self.state.balance.stock.availableCash > 0
+                    ):
+                        calc_cash = self.state.balance.stock.availableCash
+                        live_stock_val = sum(
+                            p.openQuantity * current_prices.get(p.symbol, p.marketPrice or p.costPrice)
+                            for p in self.state.positions
+                        ) if self.state.positions else 0.0
+                        total_cash = self.state.balance.stock.totalCash or calc_cash
+                        calc_nav = max(total_cash + live_stock_val, calc_cash)
+                    else:
+                        calc_cash = account.cash_balance
+                        calc_nav = account.nav
+
                     # 2-Layer Position Sizing (ATR-Risk + 25% NAV Hard Cap & 85% Exposure Cap)
                     top_summary = self.state.vn30_summaries.get(top_signal.symbol)
                     top_atr = top_summary.atr14 if top_summary else None
@@ -399,15 +474,16 @@ class AutoTrader:
                     )
 
                     qty = calculate_position_size(
-                        available_cash=account.cash_balance,
-                        nav=account.nav,
+                        available_cash=calc_cash,
+                        nav=calc_nav,
                         price=top_signal.price,
                         atr=top_atr,
                         risk_per_trade_pct=risk_pct,
                         stop_mult=1.5,
                         max_pos_pct=max_pos_pct,
                         current_open_exposure=current_exposure,
-                        portfolio_exposure_cap=exposure_cap
+                        portfolio_exposure_cap=exposure_cap,
+                        target_vol_annualized=0.15
                     )
 
                     # Boundary condition: reject if final_qty < 1
@@ -423,7 +499,7 @@ class AutoTrader:
 
                     # Validate Portfolio Exposure Cap & Position Cap
                     if safeguards:
-                        valid_pos, pos_msg = safeguards.validate_position_size(qty * top_signal.price, account.nav)
+                        valid_pos, pos_msg = safeguards.validate_position_size(qty * top_signal.price, calc_nav)
                         if not valid_pos:
                             pos_alert = f"🛑 [TỪ CHỐI MUA DO TRẦN VỊ THẾ] {top_signal.symbol}: {pos_msg}"
                             alerts.append(pos_alert)
@@ -432,7 +508,7 @@ class AutoTrader:
                             return alerts
 
                         valid_exp, exp_msg = safeguards.validate_portfolio_exposure(
-                            current_exposure, qty * top_signal.price, account.nav
+                            current_exposure, qty * top_signal.price, calc_nav
                         )
                         if not valid_exp:
                             exp_alert = f"🛑 [TỪ CHỐI MUA DO TRẦN PHƠI NHIỄM] {top_signal.symbol}: {exp_msg}"
@@ -442,21 +518,21 @@ class AutoTrader:
                             return alerts
 
                     if qty >= 1:
-                        order = await self.engine.execute_buy(top_signal.symbol, qty, top_signal.price)
-                        lot_type = "Lô chẵn" if qty >= 100 else "Lô lẻ"
-                        if order.status == OrderStatus.FILLED:
-                            alert = (
-                                f"🚀 [AUTO-TRADE MUA GIẢ LẬP] {top_signal.symbol}\n"
-                                f"- Chiến lược: {top_signal.strategy.value}\n"
-                                f"- Khối lượng: {qty:,} cp ({lot_type})\n"
-                                f"- Giá khớp: {top_signal.price:,.0f} đ\n"
-                                f"- Lý do: {top_signal.reason}"
-                            )
-                            alerts.append(alert)
-                            if self.notify_func:
-                                await self.notify_func(alert)
-
-                        if self.live_trader and self.live_trader.safeguards.mode in (TradingMode.LIVE_CONFIRM, TradingMode.LIVE_AUTO):
+                        if not is_live_mode:
+                            order = await self.engine.execute_buy(top_signal.symbol, qty, top_signal.price)
+                            lot_type = "Lô chẵn" if qty >= 100 else "Lô lẻ"
+                            if order.status == OrderStatus.FILLED:
+                                alert = (
+                                    f"🚀 [AUTO-TRADE MUA GIẢ LẬP] {top_signal.symbol}\n"
+                                    f"- Chiến lược: {top_signal.strategy.value}\n"
+                                    f"- Khối lượng: {qty:,} cp ({lot_type})\n"
+                                    f"- Giá khớp: {top_signal.price:,.0f} đ\n"
+                                    f"- Lý do: {top_signal.reason}"
+                                )
+                                alerts.append(alert)
+                                if self.notify_func:
+                                    await self.notify_func(alert)
+                        else:
                             live_res = await self.live_trader.route_order(
                                 symbol=top_signal.symbol,
                                 side="NB",

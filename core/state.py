@@ -53,6 +53,19 @@ class TradingState:
         self.is_connected = True
         self.last_sync_time = time.time()
 
+    def get_sub_account_id(self, fallback: Optional[str] = None) -> str:
+        if self.account and self.account.accounts and len(self.account.accounts) > 0:
+            return self.account.accounts[0].id
+        if fallback:
+            return fallback
+        try:
+            from config.settings import settings
+            if settings and settings.DNSE_SUB_ACCOUNT:
+                return settings.DNSE_SUB_ACCOUNT
+        except Exception:
+            pass
+        return "0001880229"
+
     def set_balance(self, balance: AccountBalance):
         self.balance = balance
         self.last_sync_time = time.time()

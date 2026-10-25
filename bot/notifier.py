@@ -14,4 +14,9 @@ class TelegramNotifier:
         try:
             await self.bot.send_message(self.chat_id, text, parse_mode="Markdown")
         except Exception as e:
-            logger.error(f"Failed to send Telegram alert: {e}")
+            logger.warning(f"Markdown parsing failed for Telegram alert ({e}), retrying as plain text...")
+            try:
+                clean_text = text.replace("**", "").replace("`", "")
+                await self.bot.send_message(self.chat_id, clean_text)
+            except Exception as ex2:
+                logger.error(f"Failed to send fallback plain text Telegram alert: {ex2}")

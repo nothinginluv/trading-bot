@@ -123,5 +123,32 @@ async def test_auto_trader_with_live_trader(tmp_path):
     assert any("YÊU CẦU XÁC NHẬN" in a for a in alerts)
     assert len(live_trader.pending_confirmations) == 1
 
+    # Verify paper engine was NOT used to falsely buy/record the position
+    paper_pos = await repo.get_position("HPG")
+    assert paper_pos is None or paper_pos.total_quantity == 0
+
     await client.close()
+
+
+@pytest.mark.asyncio
+async def test_auto_trader_lock_concurrency(tmp_path):
+    import asyncio
+    test_db = str(tmp_path / "test_auto_trader_lock.db")
+    await init_db(test_db)
+    repo = PaperTradingRepository(db_path=test_db)
+    engine = PaperEngine(repo)
+    await engine.initialize(5000000.0)
+
+    state = TradingState()
+    notifier = AsyncMock()
+    trader = AutoTrader(engine=engine, state=state, notify_func=notifier)
+
+    # When lock is acquired by another background task, concurrent process_cycle skips
+    async with trader._lock:
+        res = await trader.process_cycle()
+        assert res == []
+
+    # When lock is free, process_cycle executes normally
+    res_free = await trader.process_cycle()
+    assert isinstance(res_free, list)
 

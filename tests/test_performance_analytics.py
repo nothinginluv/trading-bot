@@ -20,6 +20,12 @@ async def test_performance_statistics_calculation(tmp_path):
     assert empty_stats["total_trades"] == 0
     assert empty_stats["win_rate_pct"] == 0.0
     assert empty_stats["profit_factor"] == 0.0
+    assert empty_stats["sharpe_ratio"] == 0.0
+    assert empty_stats["sortino_ratio"] == 0.0
+    assert empty_stats["calmar_ratio"] == 0.0
+    assert empty_stats["expectancy_vnd"] == 0.0
+    assert empty_stats["max_drawdown_vnd"] == 0.0
+    assert empty_stats["max_drawdown_pct"] == 0.0
 
     # 2. Record simulated trades
     # Trade 1: Win (+200,000 VND)
@@ -44,6 +50,20 @@ async def test_performance_statistics_calculation(tmp_path):
     assert stats["best_trade"] == 200000.0
     assert stats["worst_trade"] == -100000.0
     assert stats["profit_factor"] == 2.0
+    assert stats["avg_win"] == 200000.0
+    assert stats["avg_loss"] == 100000.0
+    assert stats["win_loss_ratio"] == 2.0
+    assert stats["expectancy_vnd"] == 33333.33
+    assert stats["max_drawdown_vnd"] == 100000.0
+    assert stats["max_drawdown_pct"] == 1.92
+    assert isinstance(stats["sharpe_ratio"], float)
+    assert isinstance(stats["sortino_ratio"], float)
+    assert isinstance(stats["calmar_ratio"], float)
+
+    # Verify fractional returns query
+    rets = await paper_repo.get_closed_trade_returns_pct()
+    assert len(rets) == 3
+    assert round(rets[0], 4) == round(200000.0 / 5000000.0, 4)
 
 @pytest.mark.asyncio
 async def test_cmd_pnl_telegram_handler(tmp_path):
@@ -84,3 +104,8 @@ async def test_cmd_pnl_telegram_handler(tmp_path):
     assert "Phơi nhiễm danh mục" in reply_text
     assert "Trần: 85% NAV" in reply_text
     assert "Drawdown Ngày" in reply_text
+    assert "CHỈ SỐ RỦI RO ĐỊNH LƯỢNG" in reply_text
+    assert "Sharpe Ratio" in reply_text
+    assert "Sortino Ratio" in reply_text
+    assert "Calmar Ratio" in reply_text
+    assert "Max Drawdown Lịch sử" in reply_text

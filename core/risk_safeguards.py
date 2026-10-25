@@ -1,6 +1,32 @@
+import math
 from enum import Enum
 from typing import Optional, Tuple, List
 from datetime import datetime
+
+def calculate_hose_collar(reference_price: float) -> Tuple[float, float]:
+    """
+    Calculates HOSE Floor and Ceiling prices with standard tick size rounding:
+    - Tick sizes: < 10k: 10d, 10k-50k: 50d, >= 50k: 100d.
+    - Ceiling: reference * 1.07 rounded down to tick size.
+    - Floor: reference * 0.93 rounded up to tick size.
+    """
+    def _tick(p: float) -> float:
+        if p < 10_000:
+            return 10.0
+        elif p < 50_000:
+            return 50.0
+        else:
+            return 100.0
+
+    raw_ceil = reference_price * 1.07
+    tick_ceil = _tick(raw_ceil)
+    ceiling_price = math.floor(round(raw_ceil, 2) / tick_ceil) * tick_ceil
+
+    raw_floor = reference_price * 0.93
+    tick_floor = _tick(raw_floor)
+    floor_price = math.ceil(round(raw_floor, 2) / tick_floor) * tick_floor
+
+    return floor_price, ceiling_price
 
 class TradingMode(str, Enum):
     PAPER = "PAPER"
@@ -92,12 +118,11 @@ class RiskSafeguards:
         if gross_value > self.max_order_value:
             return False, f"⚠️ Giá trị lệnh ({gross_value:,.0f} đ) vượt quá Hạn mức tối đa ({self.max_order_value:,.0f} đ)"
 
-        # 4. HOSE price collar check (+-7%)
+        # 4. HOSE price collar check (+-7% with tick size rounding)
         if reference_price and reference_price > 0:
-            floor_price = reference_price * 0.93
-            ceiling_price = reference_price * 1.07
-            if price < floor_price or price > ceiling_price:
-                return False, f"⚠️ Giá đặt {price:,.0f} đ vi phạm biên độ Trần/Sàn HOSE (+-7% từ tham chiếu {reference_price:,.0f} đ)"
+            floor_price, ceiling_price = calculate_hose_collar(reference_price)
+            if price < (floor_price - 1.0) or price > (ceiling_price + 1.0):
+                return False, f"⚠️ Giá đặt {price:,.0f} đ vi phạm biên độ Trần/Sàn HOSE [Sàn: {floor_price:,.0f} đ, Trần: {ceiling_price:,.0f} đ] từ tham chiếu {reference_price:,.0f} đ"
 
         return True, "OK"
 

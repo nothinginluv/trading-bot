@@ -69,3 +69,32 @@ def test_volatility_sizing_never_exceeds_available_cash():
     )
     # Total cost must be <= cash
     assert qty * price * 1.0015 <= cash
+
+def test_institutional_volatility_targeting():
+    from strategy.risk import calculate_volatility_target_size
+    nav = 100_000_000.0
+    price = 50_000.0
+
+    # Stock A: Low annual volatility (ATR = 500đ -> daily vol 1%, annual vol ~ 15.8%)
+    qty_low = calculate_volatility_target_size(
+        nav=nav, price=price, atr=500.0, target_vol_annualized=0.15, max_slots=4
+    )
+
+    # Stock B: High annual volatility (ATR = 2,500đ -> daily vol 5%, annual vol ~ 79%)
+    qty_high = calculate_volatility_target_size(
+        nav=nav, price=price, atr=2500.0, target_vol_annualized=0.15, max_slots=4
+    )
+
+    assert qty_low > qty_high
+    assert qty_high > 0
+
+    # Verify integration with calculate_position_size
+    qty_with_vol_target = calculate_position_size(
+        available_cash=nav,
+        nav=nav,
+        price=price,
+        atr=2500.0,
+        target_vol_annualized=0.15
+    )
+    assert qty_with_vol_target <= qty_high
+

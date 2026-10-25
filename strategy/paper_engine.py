@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
+from core.market_hours import MarketHours
 from storage.repository import PaperTradingRepository
 from strategy.models import (
     PaperAccount, PaperPosition, PaperOrder,
@@ -9,7 +10,7 @@ from strategy.models import (
 
 def get_next_business_day(cur_date: datetime) -> datetime:
     next_day = cur_date + timedelta(days=1)
-    while next_day.weekday() >= 5:  # 5=Sat, 6=Sun
+    while next_day.weekday() >= 5 or MarketHours.is_holiday(next_day):
         next_day += timedelta(days=1)
     return next_day
 
@@ -107,32 +108,11 @@ class PaperEngine:
             await self.repo.record_order(order)
             return order
 
-        # Deduct cash
-        new_cash = account.cash_balance - total_required
-        await self.repo.update_account_balance(new_cash)
-
-        # Update position
-        existing_pos = await self.repo.get_position(symbol)
         now = datetime.now()
         buy_date_str = now.strftime("%Y-%m-%d")
         settle_date_str = compute_settlement_date(now, 2)
+        new_cash = account.cash_balance - total_required
 
-        if existing_pos and existing_pos.total_quantity > 0:
-            total_qty = existing_pos.total_quantity + quantity
-            # Volume-weighted average price (VWAP)
-            new_avg_price = (
-                (existing_pos.total_quantity * existing_pos.avg_buy_price) + (quantity * exec_price)
-            ) / total_qty
-            highest_price = max(existing_pos.highest_price, exec_price)
-            available_qty = existing_pos.available_quantity  # Newly bought shares are unsettled
-            await self.repo.upsert_position(symbol, total_qty, available_qty, new_avg_price, highest_price, tp1_taken=existing_pos.tp1_taken)
-        else:
-            await self.repo.upsert_position(symbol, quantity, 0, exec_price, exec_price, tp1_taken=False)
-
-        # Record settlement tranche for T+2
-        await self.repo.add_settlement_tranche(symbol, quantity, buy_date_str, settle_date_str)
-
-        # Record order and trade
         order = PaperOrder(
             order_id=order_id,
             symbol=symbol,
@@ -145,17 +125,41 @@ class PaperEngine:
             tax=0.0,
             matched_at=now
         )
-        await self.repo.record_order(order)
-        await self.repo.record_trade(
-            order_id=order_id,
-            symbol=symbol,
-            side=OrderSide.BUY,
-            quantity=quantity,
-            price=exec_price,
-            fee=fee,
-            tax=0.0,
-            realized_pnl=0.0
-        )
+
+        async with self.repo.transaction() as db:
+            # Deduct cash
+            await self.repo.update_account_balance(new_cash, db=db)
+
+            # Update position
+            existing_pos = await self.repo.get_position(symbol)
+            if existing_pos and existing_pos.total_quantity > 0:
+                total_qty = existing_pos.total_quantity + quantity
+                # Volume-weighted average price (VWAP)
+                new_avg_price = (
+                    (existing_pos.total_quantity * existing_pos.avg_buy_price) + (quantity * exec_price)
+                ) / total_qty
+                highest_price = max(existing_pos.highest_price, exec_price)
+                available_qty = existing_pos.available_quantity  # Newly bought shares are unsettled
+                await self.repo.upsert_position(symbol, total_qty, available_qty, new_avg_price, highest_price, tp1_taken=existing_pos.tp1_taken, db=db)
+            else:
+                await self.repo.upsert_position(symbol, quantity, 0, exec_price, exec_price, tp1_taken=False, db=db)
+
+            # Record settlement tranche for T+2
+            await self.repo.add_settlement_tranche(symbol, quantity, buy_date_str, settle_date_str, db=db)
+
+            # Record order and trade
+            await self.repo.record_order(order, db=db)
+            await self.repo.record_trade(
+                order_id=order_id,
+                symbol=symbol,
+                side=OrderSide.BUY,
+                quantity=quantity,
+                price=exec_price,
+                fee=fee,
+                tax=0.0,
+                realized_pnl=0.0,
+                db=db
+            )
         return order
 
     async def execute_sell(
@@ -214,24 +218,10 @@ class PaperEngine:
         # Update cash balance
         account = await self.repo.get_or_create_account()
         new_cash = account.cash_balance + net_received
-        await self.repo.update_account_balance(new_cash)
 
-        # Update or remove position
         new_total_qty = existing_pos.total_quantity - quantity
         new_avail_qty = existing_pos.available_quantity - quantity
-        if new_total_qty <= 0:
-            await self.repo.delete_position(symbol)
-        else:
-            await self.repo.upsert_position(
-                symbol,
-                new_total_qty,
-                new_avail_qty,
-                existing_pos.avg_buy_price,
-                existing_pos.highest_price,
-                tp1_taken=existing_pos.tp1_taken
-            )
 
-        # Record order and trade
         order = PaperOrder(
             order_id=order_id,
             symbol=symbol,
@@ -244,17 +234,37 @@ class PaperEngine:
             tax=tax,
             matched_at=now
         )
-        await self.repo.record_order(order)
-        await self.repo.record_trade(
-            order_id=order_id,
-            symbol=symbol,
-            side=OrderSide.SELL,
-            quantity=quantity,
-            price=exec_price,
-            fee=fee,
-            tax=tax,
-            realized_pnl=realized_pnl
-        )
+
+        async with self.repo.transaction() as db:
+            await self.repo.update_account_balance(new_cash, db=db)
+
+            # Update or remove position
+            if new_total_qty <= 0:
+                await self.repo.delete_position(symbol, db=db)
+            else:
+                await self.repo.upsert_position(
+                    symbol,
+                    new_total_qty,
+                    new_avail_qty,
+                    existing_pos.avg_buy_price,
+                    existing_pos.highest_price,
+                    tp1_taken=existing_pos.tp1_taken,
+                    db=db
+                )
+
+            # Record order and trade
+            await self.repo.record_order(order, db=db)
+            await self.repo.record_trade(
+                order_id=order_id,
+                symbol=symbol,
+                side=OrderSide.SELL,
+                quantity=quantity,
+                price=exec_price,
+                fee=fee,
+                tax=tax,
+                realized_pnl=realized_pnl,
+                db=db
+            )
         return order
 
     async def get_account_summary(self, current_prices: Optional[Dict[str, float]] = None) -> PaperAccount:

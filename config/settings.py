@@ -17,8 +17,12 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     return Settings()
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 settings = None
 try:
     settings = get_settings()
-except Exception:
-    pass
+except Exception as e:
+    logger.warning(f"Không thể khởi tạo cấu hình từ .env ({e}). Cần kiểm tra lại các biến môi trường bắt buộc.")

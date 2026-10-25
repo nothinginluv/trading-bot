@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 async def sync_data_job(client, state, repo, notifier=None):
     if not client or not state.account:
         return
-    sub_id = state.account.accounts[0].id
+    sub_id = state.get_sub_account_id()
     try:
         start = time.time()
         bal = await client.get_balances(sub_id)

@@ -5,6 +5,7 @@ from core.risk_safeguards import RiskSafeguards, TradingMode
 from dnse.mock_client import MockDNSEClient
 from strategy.live_trader import LiveTrader
 from core.state import TradingState
+from dnse.models import LiveOrder
 from bot.handlers.live import (
     cmd_mode,
     cmd_kill_switch,
@@ -35,10 +36,14 @@ async def test_cmd_mode_and_kill_switch():
     await cmd_mode(msg, safeguards)
     assert safeguards.mode == TradingMode.LIVE_CONFIRM
 
-    # 3. Kill Switch command
+    # 3. Kill Switch command with CONFIRMED and QUEUED orders
+    client.orders.append(LiveOrder(id="ORD-CONF", symbol="TCB", side="NB", orderType="LO", quantity=100, price=22000.0, orderStatus="CONFIRMED"))
+    client.orders.append(LiveOrder(id="ORD-QUEUED", symbol="MBB", side="NB", orderType="LO", quantity=100, price=23000.0, orderStatus="QUEUED"))
     await cmd_kill_switch(msg, safeguards, client, state_obj)
     assert safeguards.kill_switch_active is True
     assert "CẦU DAO KHẨN CẤP" in msg.answer.call_args[0][0]
+    assert any(o.id == "ORD-CONF" and o.orderStatus == "CANCELLED" for o in client.orders)
+    assert any(o.id == "ORD-QUEUED" and o.orderStatus == "CANCELLED" for o in client.orders)
 
     # 4. Resume command
     await cmd_resume(msg, safeguards)

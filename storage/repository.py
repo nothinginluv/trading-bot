@@ -1,3 +1,5 @@
+import math
+from datetime import datetime
 import aiosqlite
 from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any
@@ -298,6 +300,18 @@ class PaperTradingRepository:
     def __init__(self, db_path: str = "storage/bot.db"):
         self.db_path = db_path
 
+    @asynccontextmanager
+    async def transaction(self):
+        """Atomic transaction context manager for multi-step order execution."""
+        async with _connect_db(self.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE;")
+            try:
+                yield db
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
+
     async def get_or_create_account(self, initial_capital: float = 5000000.0):
         from strategy.models import PaperAccount
         async with _connect_db(self.db_path) as db:
@@ -324,13 +338,20 @@ class PaperTradingRepository:
                 auto_trade_enabled=True
             )
 
-    async def update_account_balance(self, cash_balance: float):
-        async with _connect_db(self.db_path) as db:
+    async def update_account_balance(self, cash_balance: float, db: Optional[Any] = None):
+        if db is not None:
             await db.execute(
                 "UPDATE paper_account SET cash_balance = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
                 (cash_balance,)
             )
-            await db.commit()
+            return
+
+        async with _connect_db(self.db_path) as conn:
+            await conn.execute(
+                "UPDATE paper_account SET cash_balance = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
+                (cash_balance,)
+            )
+            await conn.commit()
 
     async def set_auto_trade(self, enabled: bool):
         async with _connect_db(self.db_path) as db:
@@ -375,21 +396,24 @@ class PaperTradingRepository:
                 tp1_taken=bool(row["tp1_taken"]) if "tp1_taken" in row.keys() else False
             )
 
-    async def upsert_position(self, symbol: str, total_qty: int, available_qty: int, avg_price: float, highest_price: float, tp1_taken: bool = False):
-        async with _connect_db(self.db_path) as db:
-            await db.execute(
-                """INSERT INTO paper_positions (symbol, total_quantity, available_quantity, avg_buy_price, highest_price, tp1_taken, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                   ON CONFLICT(symbol) DO UPDATE SET
-                       total_quantity = excluded.total_quantity,
-                       available_quantity = excluded.available_quantity,
-                       avg_buy_price = excluded.avg_buy_price,
-                       highest_price = excluded.highest_price,
-                       tp1_taken = excluded.tp1_taken,
-                       updated_at = CURRENT_TIMESTAMP""",
-                (symbol.upper(), total_qty, available_qty, avg_price, highest_price, 1 if tp1_taken else 0)
-            )
-            await db.commit()
+    async def upsert_position(self, symbol: str, total_qty: int, available_qty: int, avg_price: float, highest_price: float, tp1_taken: bool = False, db: Optional[Any] = None):
+        sql = """INSERT INTO paper_positions (symbol, total_quantity, available_quantity, avg_buy_price, highest_price, tp1_taken, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 ON CONFLICT(symbol) DO UPDATE SET
+                     total_quantity = excluded.total_quantity,
+                     available_quantity = excluded.available_quantity,
+                     avg_buy_price = excluded.avg_buy_price,
+                     highest_price = excluded.highest_price,
+                     tp1_taken = excluded.tp1_taken,
+                     updated_at = CURRENT_TIMESTAMP"""
+        params = (symbol.upper(), total_qty, available_qty, avg_price, highest_price, 1 if tp1_taken else 0)
+        if db is not None:
+            await db.execute(sql, params)
+            return
+
+        async with _connect_db(self.db_path) as conn:
+            await conn.execute(sql, params)
+            await conn.commit()
 
     async def set_position_tp1_taken(self, symbol: str, taken: bool = True):
         async with _connect_db(self.db_path) as db:
@@ -399,10 +423,16 @@ class PaperTradingRepository:
             )
             await db.commit()
 
-    async def delete_position(self, symbol: str):
-        async with _connect_db(self.db_path) as db:
-            await db.execute("DELETE FROM paper_positions WHERE symbol = ?", (symbol.upper(),))
-            await db.commit()
+    async def delete_position(self, symbol: str, db: Optional[Any] = None):
+        sql = "DELETE FROM paper_positions WHERE symbol = ?"
+        params = (symbol.upper(),)
+        if db is not None:
+            await db.execute(sql, params)
+            return
+
+        async with _connect_db(self.db_path) as conn:
+            await conn.execute(sql, params)
+            await conn.commit()
 
     async def update_highest_price(self, symbol: str, highest_price: float):
         async with _connect_db(self.db_path) as db:
@@ -490,14 +520,17 @@ class PaperTradingRepository:
                 )
             return await cursor.fetchall()
 
-    async def add_settlement_tranche(self, symbol: str, quantity: int, buy_date: str, settle_date: str):
-        async with _connect_db(self.db_path) as db:
-            await db.execute(
-                """INSERT INTO paper_settlement_tranches (symbol, quantity, buy_date, settle_date, is_settled)
-                   VALUES (?, ?, ?, ?, 0)""",
-                (symbol.upper(), quantity, buy_date, settle_date)
-            )
-            await db.commit()
+    async def add_settlement_tranche(self, symbol: str, quantity: int, buy_date: str, settle_date: str, db: Optional[Any] = None):
+        sql = """INSERT INTO paper_settlement_tranches (symbol, quantity, buy_date, settle_date, is_settled)
+                 VALUES (?, ?, ?, ?, 0)"""
+        params = (symbol.upper(), quantity, buy_date, settle_date)
+        if db is not None:
+            await db.execute(sql, params)
+            return
+
+        async with _connect_db(self.db_path) as conn:
+            await conn.execute(sql, params)
+            await conn.commit()
 
     async def settle_mature_tranches(self, current_date: str) -> int:
         """Settles tranches where settle_date <= current_date and is_settled = 0."""
@@ -524,40 +557,68 @@ class PaperTradingRepository:
             await db.commit()
         return total_settled
 
-    async def record_order(self, order):
-        async with _connect_db(self.db_path) as db:
-            await db.execute(
-                """INSERT INTO paper_orders (order_id, symbol, side, quantity, order_type, price, status, fee, tax)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    order.order_id,
-                    order.symbol.upper(),
-                    order.side.value if hasattr(order.side, "value") else str(order.side),
-                    order.quantity,
-                    order.order_type.value if hasattr(order.order_type, "value") else str(order.order_type),
-                    order.price,
-                    order.status.value if hasattr(order.status, "value") else str(order.status),
-                    order.fee,
-                    order.tax
-                )
-            )
-            await db.commit()
+    async def record_order(self, order, db: Optional[Any] = None):
+        sql = """INSERT INTO paper_orders (order_id, symbol, side, quantity, order_type, price, status, fee, tax)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+        params = (
+            order.order_id,
+            order.symbol.upper(),
+            order.side.value if hasattr(order.side, "value") else str(order.side),
+            order.quantity,
+            order.order_type.value if hasattr(order.order_type, "value") else str(order.order_type),
+            order.price,
+            order.status.value if hasattr(order.status, "value") else str(order.status),
+            order.fee,
+            order.tax
+        )
+        if db is not None:
+            await db.execute(sql, params)
+            return
 
-    async def record_trade(self, order_id: str, symbol: str, side, quantity: int, price: float, fee: float, tax: float, realized_pnl: float):
+        async with _connect_db(self.db_path) as conn:
+            await conn.execute(sql, params)
+            await conn.commit()
+
+    async def record_trade(self, order_id: str, symbol: str, side, quantity: int, price: float, fee: float, tax: float, realized_pnl: float, db: Optional[Any] = None):
         side_str = side.value if hasattr(side, "value") else str(side)
-        async with _connect_db(self.db_path) as db:
-            await db.execute(
-                """INSERT INTO paper_trades (order_id, symbol, side, quantity, price, fee, tax, realized_pnl)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (order_id, symbol.upper(), side_str, quantity, price, fee, tax, realized_pnl)
-            )
-            await db.commit()
+        sql = """INSERT INTO paper_trades (order_id, symbol, side, quantity, price, fee, tax, realized_pnl)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)"""
+        params = (order_id, symbol.upper(), side_str, quantity, price, fee, tax, realized_pnl)
+        if db is not None:
+            await db.execute(sql, params)
+            return
+
+        async with _connect_db(self.db_path) as conn:
+            await conn.execute(sql, params)
+            await conn.commit()
 
     async def get_total_realized_pnl(self) -> float:
         async with _connect_db(self.db_path) as db:
             cursor = await db.execute("SELECT COALESCE(SUM(realized_pnl), 0.0) FROM paper_trades")
             row = await cursor.fetchone()
             return float(row[0]) if row else 0.0
+
+    async def get_closed_trade_pnls(self) -> List[float]:
+        async with _connect_db(self.db_path) as db:
+            cursor = await db.execute("SELECT realized_pnl FROM paper_trades WHERE side = 'SELL' ORDER BY id ASC")
+            rows = await cursor.fetchall()
+            return [float(r[0]) for r in rows]
+
+    async def get_closed_trade_returns_pct(self) -> List[float]:
+        async with _connect_db(self.db_path) as db:
+            acc_cursor = await db.execute("SELECT initial_balance FROM paper_account WHERE id = 1")
+            acc_row = await acc_cursor.fetchone()
+            equity = float(acc_row[0]) if acc_row and acc_row[0] else 5_000_000.0
+
+            cursor = await db.execute("SELECT realized_pnl FROM paper_trades WHERE side = 'SELL' ORDER BY id ASC")
+            rows = await cursor.fetchall()
+            returns = []
+            for r in rows:
+                pnl = float(r[0])
+                ret = (pnl / equity) if equity > 0 else 0.0
+                returns.append(ret)
+                equity += pnl
+            return returns
 
     async def reset_account(self, reset_balance: float = 5000000.0):
         async with _connect_db(self.db_path) as db:
@@ -589,6 +650,15 @@ class PaperTradingRepository:
         - best_trade
         - worst_trade
         - profit_factor
+        - avg_win
+        - avg_loss
+        - win_loss_ratio
+        - expectancy_vnd
+        - max_drawdown_vnd
+        - max_drawdown_pct
+        - sharpe_ratio
+        - sortino_ratio
+        - calmar_ratio
         """
         async with _connect_db(self.db_path) as db:
             cursor = await db.execute(
@@ -618,7 +688,16 @@ class PaperTradingRepository:
                     "total_realized_pnl": 0.0,
                     "best_trade": 0.0,
                     "worst_trade": 0.0,
-                    "profit_factor": 0.0
+                    "profit_factor": 0.0,
+                    "avg_win": 0.0,
+                    "avg_loss": 0.0,
+                    "win_loss_ratio": 0.0,
+                    "expectancy_vnd": 0.0,
+                    "max_drawdown_vnd": 0.0,
+                    "max_drawdown_pct": 0.0,
+                    "sharpe_ratio": 0.0,
+                    "sortino_ratio": 0.0,
+                    "calmar_ratio": 0.0
                 }
 
             total_trades = row[0]
@@ -633,6 +712,100 @@ class PaperTradingRepository:
 
             win_rate_pct = round((winning_trades / total_trades) * 100, 2) if total_trades > 0 else 0.0
             profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else (99.0 if gross_profit > 0 else 0.0)
+            avg_win = round(gross_profit / winning_trades, 2) if winning_trades > 0 else 0.0
+            avg_loss = round(gross_loss / losing_trades, 2) if losing_trades > 0 else 0.0
+            win_loss_ratio = round(avg_win / avg_loss, 2) if avg_loss > 0 else (99.0 if avg_win > 0 else 0.0)
+            expectancy_vnd = round(total_realized_pnl / total_trades, 2) if total_trades > 0 else 0.0
+
+            # Fetch account initial balance for equity curve calculation
+            acc_cursor = await db.execute("SELECT initial_balance FROM paper_account WHERE id = 1")
+            acc_row = await acc_cursor.fetchone()
+            initial_balance = float(acc_row[0]) if acc_row and acc_row[0] else 5_000_000.0
+
+            # Chronological trades for equity curve and institutional risk metrics
+            trades_cursor = await db.execute(
+                "SELECT realized_pnl, created_at FROM paper_trades WHERE side = 'SELL' ORDER BY id ASC"
+            )
+            trade_rows = await trades_cursor.fetchall()
+            pnls = [float(r[0]) for r in trade_rows]
+            timestamps = [r[1] for r in trade_rows if r[1]]
+
+            equity = initial_balance
+            peak = equity
+            max_drawdown_vnd = 0.0
+            max_drawdown_pct = 0.0
+            trade_returns = []
+
+            for pnl in pnls:
+                prev_equity = equity
+                equity += pnl
+                ret = (pnl / prev_equity) if prev_equity > 0 else 0.0
+                trade_returns.append(ret)
+
+                if equity > peak:
+                    peak = equity
+
+                dd_vnd = peak - equity
+                dd_pct = (dd_vnd / peak * 100.0) if peak > 0 else 0.0
+
+                if dd_vnd > max_drawdown_vnd:
+                    max_drawdown_vnd = dd_vnd
+                if dd_pct > max_drawdown_pct:
+                    max_drawdown_pct = dd_pct
+
+            # Calculate actual holding time span and dynamic annualization factors
+            days_span = 1.0
+            if len(timestamps) >= 2:
+                try:
+                    t0 = datetime.fromisoformat(str(timestamps[0]).replace("Z", ""))
+                    t1 = datetime.fromisoformat(str(timestamps[-1]).replace("Z", ""))
+                    days_span = max(1.0, (t1 - t0).total_seconds() / 86400.0)
+                except Exception:
+                    days_span = max(1.0, float(len(pnls)))
+            else:
+                days_span = max(1.0, float(len(pnls)))
+
+            # Estimated trades per year (assuming 250 trading days in Vietnam)
+            trades_per_year = max(1.0, min(500.0, len(pnls) * (250.0 / days_span)))
+            ann_factor = math.sqrt(trades_per_year)
+            rf_per_trade = 0.05 / trades_per_year
+
+            if len(trade_returns) > 0:
+                mean_ret = sum(trade_returns) / len(trade_returns)
+                if len(trade_returns) > 1:
+                    variance = sum((r - mean_ret) ** 2 for r in trade_returns) / (len(trade_returns) - 1)
+                    std_ret = math.sqrt(variance)
+                else:
+                    std_ret = 0.0
+
+                if std_ret > 1e-9:
+                    sharpe_ratio = round(((mean_ret - rf_per_trade) / std_ret) * ann_factor, 2)
+                else:
+                    sharpe_ratio = 99.0 if (mean_ret - rf_per_trade) > 0 else 0.0
+
+                downside_diffs = [min(0.0, r - rf_per_trade) for r in trade_returns]
+                downside_variance = sum(d ** 2 for d in downside_diffs) / len(downside_diffs)
+                downside_dev = math.sqrt(downside_variance)
+                if downside_dev > 1e-9:
+                    sortino_ratio = round(((mean_ret - rf_per_trade) / downside_dev) * ann_factor, 2)
+                else:
+                    sortino_ratio = 99.0 if (mean_ret - rf_per_trade) > 0 else 0.0
+
+                # Calmar Ratio based on annualized CAGR
+                years = max(days_span / 250.0, 1.0 / 250.0)
+                if equity > 0 and initial_balance > 0:
+                    cagr = (((equity / initial_balance) ** (1.0 / years)) - 1.0) * 100.0
+                else:
+                    cagr = -100.0
+
+                if max_drawdown_pct > 1e-6:
+                    calmar_ratio = round(cagr / max_drawdown_pct, 2)
+                else:
+                    calmar_ratio = 99.0 if cagr > 0 else 0.0
+            else:
+                sharpe_ratio = 0.0
+                sortino_ratio = 0.0
+                calmar_ratio = 0.0
 
             return {
                 "total_trades": total_trades,
@@ -643,7 +816,16 @@ class PaperTradingRepository:
                 "total_realized_pnl": total_realized_pnl,
                 "best_trade": best_trade,
                 "worst_trade": worst_trade,
-                "profit_factor": profit_factor
+                "profit_factor": profit_factor,
+                "avg_win": avg_win,
+                "avg_loss": avg_loss,
+                "win_loss_ratio": win_loss_ratio,
+                "expectancy_vnd": expectancy_vnd,
+                "max_drawdown_vnd": round(max_drawdown_vnd, 2),
+                "max_drawdown_pct": round(max_drawdown_pct, 2),
+                "sharpe_ratio": sharpe_ratio,
+                "sortino_ratio": sortino_ratio,
+                "calmar_ratio": calmar_ratio
             }
 
     async def save_corporate_events(self, events: List["CorporateEvent"]) -> int:

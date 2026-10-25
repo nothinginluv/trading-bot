@@ -2,6 +2,31 @@ import math
 from typing import Optional, Tuple
 from strategy.models import PaperPosition, ExitDecision, ExitType
 
+def calculate_volatility_target_size(
+    nav: float,
+    price: float,
+    atr: float,
+    target_vol_annualized: float = 0.15,
+    max_slots: int = 4
+) -> int:
+    """
+    Computes position size based on institutional Volatility Targeting:
+    Target weight = (Target Portfolio Volatility / Asset Annualized Volatility) / max_slots.
+    Asset Daily Volatility ~ ATR / Price.
+    Asset Annualized Volatility = (ATR / Price) * sqrt(250).
+    """
+    if price <= 0 or nav <= 0 or atr <= 0 or max_slots <= 0:
+        return 0
+    daily_vol = atr / price
+    annual_vol = daily_vol * math.sqrt(250.0)
+    if annual_vol <= 1e-4:
+        return 0
+    slot_target_vol = target_vol_annualized / max_slots
+    weight = min(1.0 / max_slots, slot_target_vol / annual_vol)
+    budget = nav * weight
+    raw_qty = int(budget // price)
+    return max(0, raw_qty)
+
 def calculate_position_size(
     available_cash: float,
     nav: float,
@@ -12,36 +37,29 @@ def calculate_position_size(
     max_pos_pct: float = 0.25,
     current_open_exposure: float = 0.0,
     portfolio_exposure_cap: float = 0.85,
-    max_slot_nav_pct: Optional[float] = None
+    max_slot_nav_pct: Optional[float] = None,
+    target_vol_annualized: Optional[float] = None
 ) -> int:
     """
-    Position Sizing 2 Lớp (ATR-Risk + Hard Cap 25% NAV) & Chính sách Cash-Only Không Margin.
+    Position Sizing 3 Lớp (ATR-Risk + Volatility Targeting + Hard Cap 25% NAV) & Chính sách Cash-Only Không Margin.
 
     1. Lớp 1 (Risk-based Sizing):
        qty_by_risk = (NAV * RISK_PCT) / (STOP_MULT * ATR)
        Với STOP_MULT = 1.5, giới hạn khoảng dừng lỗ trong [3.5%, 6.5%].
     
-    2. Lớp 2 (Hard Cap % NAV):
+    2. Lớp 2 (Volatility Targeting):
+       Sizing tỷ lệ nghịch với độ biến động năm của tài sản để cố định mức rủi ro danh mục.
+
+    3. Lớp 3 (Hard Cap % NAV):
        qty_by_cap = (NAV * MAX_POS_PCT) / price
        Với MAX_POS_PCT = 25% (4 slot x 25% = tối đa 100% NAV).
     
-    3. Kết hợp min():
-       final_qty = min(qty_by_risk, qty_by_cap) nếu có ATR, ngược lại lấy qty_by_cap.
-    
     4. Ràng buộc Không Margin (Cash-Only):
        Khối lượng mua (tính cả phí 0.15%) tuyệt đối không vượt quá số tiền mặt khả dụng.
-       cash_max_qty = int(available_cash // (price * (1 + fee_rate)))
-       final_qty = min(final_qty, cash_max_qty)
 
-    5. Ràng buộc Trần phơi nhiễm danh mục (Portfolio Exposure Cap = 85% NAV):
-       remaining_exposure = max(0, NAV * portfolio_exposure_cap - current_open_exposure)
-       exposure_max_qty = int(remaining_exposure // price)
-       final_qty = min(final_qty, exposure_max_qty)
+    5. Ràng buộc Trần phơi nhiễm danh mục (Portfolio Exposure Cap = 85% NAV).
     
-    6. Quy tắc làm tròn Lô sàn HOSE:
-       - Lô chẵn (>= 100): Làm tròn xuống bội số 100 gần nhất.
-       - Lô lẻ (1 - 99): Giữ nguyên số lẻ.
-       - final_qty < 1: Trả về 0 (từ chối do vốn/hạn mức không đủ để mở vị thế tối thiểu).
+    6. Quy tắc làm tròn Lô sàn HOSE (Lô chẵn >= 100, Lô lẻ 1-99).
     """
     if price <= 0 or available_cash <= 0 or nav <= 0:
         return 0
@@ -49,16 +67,28 @@ def calculate_position_size(
     fee_rate = 0.0015
     cap_pct = max_slot_nav_pct if max_slot_nav_pct is not None else max_pos_pct
 
-    # Layer 2: Hard Cap % NAV per position
+    # Layer 3: Hard Cap % NAV per position
     pos_budget = max(nav * cap_pct, 0.0)
     qty_by_cap = int(pos_budget // price)
 
-    # Layer 1: Risk-based sizing via ATR
+    # Layer 1 & 2: Risk-based sizing & Volatility Targeting via ATR
     if atr and atr > 0:
         stop_distance = max(price * 0.035, min(price * 0.065, stop_mult * atr))
         risk_budget = max(nav * risk_per_trade_pct, 0.0)
         qty_by_risk = int(risk_budget // stop_distance) if stop_distance > 0 else qty_by_cap
         raw_qty = min(qty_by_risk, qty_by_cap)
+
+        if target_vol_annualized and target_vol_annualized > 0:
+            slots_count = max(1, int(round(1.0 / cap_pct))) if cap_pct > 0 else 4
+            qty_by_vol = calculate_volatility_target_size(
+                nav=nav,
+                price=price,
+                atr=atr,
+                target_vol_annualized=target_vol_annualized,
+                max_slots=slots_count
+            )
+            if qty_by_vol > 0:
+                raw_qty = min(raw_qty, qty_by_vol)
     else:
         raw_qty = qty_by_cap
 

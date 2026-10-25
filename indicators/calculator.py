@@ -20,10 +20,14 @@ def calculate_rsi(prices: np.ndarray, period: int = 14) -> np.ndarray:
     seed = deltas[:period]
     up = seed[seed >= 0].sum() / period
     down = -seed[seed < 0].sum() / period
-    rs = up / down if down != 0 else 0
     rsi = np.zeros_like(prices, dtype=float)
     rsi[:period] = 50.0
-    rsi[period] = 100.0 - 100.0 / (1.0 + rs) if down != 0 else 100.0
+    if down == 0 and up == 0:
+        rsi[period] = 50.0
+    elif down == 0:
+        rsi[period] = 100.0
+    else:
+        rsi[period] = 100.0 - 100.0 / (1.0 + (up / down))
 
     for i in range(period + 1, len(prices)):
         delta = deltas[i - 1]
@@ -31,8 +35,12 @@ def calculate_rsi(prices: np.ndarray, period: int = 14) -> np.ndarray:
         down_val = -delta if delta < 0 else 0.0
         up = (up * (period - 1) + up_val) / period
         down = (down * (period - 1) + down_val) / period
-        rs = up / down if down != 0 else 0
-        rsi[i] = 100.0 - 100.0 / (1.0 + rs) if down != 0 else 100.0
+        if down == 0 and up == 0:
+            rsi[i] = 50.0
+        elif down == 0:
+            rsi[i] = 100.0
+        else:
+            rsi[i] = 100.0 - 100.0 / (1.0 + (up / down))
     return rsi
 
 def calculate_macd(prices: np.ndarray, fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -205,4 +213,66 @@ def evaluate_market_regime(summary: Optional[TechnicalSummary]) -> str:
         return "BULLISH"
 
     return "SIDEWAYS"
+
+
+def calculate_price_correlation(prices_a: np.ndarray, prices_b: np.ndarray, window: int = 30) -> float:
+    """
+    Calculates Pearson correlation of daily percentage returns between two price series
+    over a rolling window (default 30 sessions).
+    Returns a float in [-1.0, 1.0].
+    Returns 0.0 if either series has insufficient data (< 4 points) or zero return variance.
+    """
+    if len(prices_a) < 4 or len(prices_b) < 4:
+        return 0.0
+    min_len = min(len(prices_a), len(prices_b), window + 1)
+    sub_a = prices_a[-min_len:]
+    sub_b = prices_b[-min_len:]
+
+    if np.any(sub_a[:-1] <= 0) or np.any(sub_b[:-1] <= 0):
+        return 0.0
+
+    ret_a = np.diff(sub_a) / sub_a[:-1]
+    ret_b = np.diff(sub_b) / sub_b[:-1]
+
+    std_a = np.std(ret_a)
+    std_b = np.std(ret_b)
+    if std_a < 1e-9 or std_b < 1e-9:
+        return 0.0
+
+    corr = np.corrcoef(ret_a, ret_b)[0, 1]
+    if np.isnan(corr) or np.isinf(corr):
+        return 0.0
+    return float(np.clip(corr, -1.0, 1.0))
+
+
+def calculate_series_correlation(series_a: OHLCVSeries, series_b: OHLCVSeries, window: int = 30) -> float:
+    """
+    Calculates Pearson correlation between two OHLCVSeries by aligning dates/timestamps.
+    Handles holidays, special sessions, and uneven series lengths cleanly.
+    """
+    if not series_a or not series_b or len(series_a.candles) < 4 or len(series_b.candles) < 4:
+        return 0.0
+
+    # Build date-to-close mappings
+    map_a = {}
+    for c in series_a.candles:
+        date_key = c.timestamp.date() if hasattr(c.timestamp, "date") else str(c.timestamp)[:10]
+        map_a[date_key] = c.close
+
+    map_b = {}
+    for c in series_b.candles:
+        date_key = c.timestamp.date() if hasattr(c.timestamp, "date") else str(c.timestamp)[:10]
+        map_b[date_key] = c.close
+
+    common_dates = sorted(set(map_a.keys()) & set(map_b.keys()))
+    if len(common_dates) < 4:
+        return 0.0
+
+    recent_dates = common_dates[-(window + 1):]
+    prices_a = np.array([map_a[d] for d in recent_dates], dtype=float)
+    prices_b = np.array([map_b[d] for d in recent_dates], dtype=float)
+
+    return calculate_price_correlation(prices_a, prices_b, window=window)
+
+
 
