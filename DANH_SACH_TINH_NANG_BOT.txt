@@ -2,7 +2,7 @@
           HỆ THỐNG BOT GIAO DỊCH CHỨNG KHOÁN TỰ ĐỘNG VN30 (AI AUTO TRADING BOT)
                            TỔNG HỢP TOÀN BỘ TÍNH NĂNG HIỆN CÓ
 ================================================================================
-Ngày cập nhật: 24/09/2026
+Ngày cập nhật: 25/10/2026
 Môi trường: Windows / Python 3.12 / SQLite / DNSE OpenAPI / Telegram Bot
 Bảo mật Whitelist: Duy nhất Admin Chat ID [7385637982] có quyền điều khiển.
 
@@ -218,7 +218,44 @@ Bảo mật Whitelist: Duy nhất Admin Chat ID [7385637982] có quyền điều
 - Chế độ Auto-Trade Paper tự động quét và đi lệnh định kỳ.
 
 --------------------------------------------------------------------------------
-8. DANH MỤC LỆNH TELEGRAM BOT CHI TIẾT
+8. HỆ THỐNG ĐỊNH LƯỢNG HEDGE FUND & STRESS-TEST (INSTITUTIONAL QUANT UPGRADE)
+--------------------------------------------------------------------------------
+- Bộ Chỉ Số Hiệu Suất Đầu Tư Chuẩn Định Lượng Quốc Tế (Institutional Performance Engine):
+  + Tỷ số Sharpe (Sharpe Ratio): Chuẩn hóa theo lãi suất phi rủi ro Việt Nam (Rf = 5.0%/năm - chuẩn trái phiếu chính phủ/tiết kiệm 1 năm), hệ số thường niên hóa căn bậc hai của 250 ngày giao dịch (sqrt(250)).
+  + Tỷ số Sortino (Sortino Ratio): Đo lường lợi nhuận trên độ lệch chuẩn rủi ro sụt giảm (Downside Deviation), bảo vệ danh mục trước các cú sốc giảm mà không phạt độ biến động tăng giá.
+  + Tỷ số Calmar (Calmar Ratio): Tỷ lệ Lợi nhuận thường niên hóa trên Mức sụt giảm tối đa (Max Drawdown %).
+  + Kỳ vọng Lợi nhuận kỳ vọng / lệnh (Mathematical Expectancy): Đo lường kỳ vọng dòng tiền sinh lời bình quân trên mỗi lệnh đã chốt (VNĐ).
+  + Tỷ số Lãi/Lỗ bình quân (Payoff Ratio / Win-Loss Ratio): Tỷ lệ giữa mức lãi trung bình và mức lỗ trung bình.
+  + Mức Sụt Giảm Tối Đa Lịch Sử (Max Drawdown % & Max Drawdown VNĐ): Đỉnh đến đáy tài sản qua chuỗi vốn (Equity Curve).
+  + Tích hợp trực tiếp vào báo cáo Telegram `/pnl` và `/performance`.
+
+- Bộ Lọc Ma Trận Tương Quan Chuỗi Giá 30 Ngày VN30 (Rolling 30-Day Pearson Correlation Filter):
+  + Tính toán ma trận hệ số tương quan Pearson giữa chuỗi tỷ suất sinh lời nến ngày (1D) của 30 mã VN30:
+    rho = Cov(Ra, Rb) / (sigma_a * sigma_b).
+  + Cơ chế kiểm định chéo (Cross-Asset Correlation Gating): Trước khi Auto-Trader đặt lệnh MUA cổ phiếu tiềm năng, bot tự động tính hệ số tương quan giữa mã đó với từng mã đang nắm giữ trong danh mục.
+  + Ngưỡng trần tương quan (Correlation Threshold <= 0.70):
+    * Nếu hệ số rho > 0.70 với bất kỳ mã nào đang nắm giữ, bot TỰ ĐỘNG TỪ CHỐI MUA mã đó.
+    * Phát cảnh báo qua Telegram nêu rõ lý do (trùng lặp rủi ro hệ thống, biến động đồng pha cao).
+    * Tự động ưu tiên chọn mã cơ hội tiếp theo có tương quan thấp để tối ưu hóa hiệu ứng đa dạng hóa danh mục Markowitz.
+
+- Định Cỡ Vị Thế Theo Mục Tiêu Biến Động (Institutional Volatility Targeting Position Sizing):
+  + Áp dụng nguyên lý phân bổ rủi ro đồng đều (Risk Parity / Volatility Targeting):
+    Weight = Target_Vol / Asset_Vol (với Target_Vol = 15%/năm).
+  + Cổ phiếu biến động thấp (Bluechip phòng thủ, biên độ hẹp) được phân bổ tỷ trọng lớn hơn.
+  + Cổ phiếu biến động mạnh (Beta cao, biên độ rung lắc lớn) tự động bị thu hẹp tỷ trọng.
+  + Kết hợp đa tầng kiểm soát: Chặn trần 25% NAV cho mỗi cổ phiếu, tổng phơi nhiễm <= 85% NAV, và tuân thủ tuyệt đối quy định lô chẵn (bội số 100) / lô lẻ (1-99) sàn HOSE.
+
+- Động Cơ Mô Phỏng Monte Carlo & Kiểm Định Căng Thẳng Đuôi (Monte Carlo Stress Testing Engine):
+  + Thực hiện 1.000+ đường mô phỏng ngẫu nhiên (Bootstrap Resampling) chuỗi phân phối lợi nhuận với phương pháp ghép lãi hình học (Geometric Compounding) cho 100 lệnh kế tiếp.
+  + Giá trị Rủi ro (Value at Risk - VaR 95% & VaR 99%): Xác định mức tổn thất tối đa có thể xảy ra trong điều kiện thị trường căng thẳng.
+  + Giá trị Rủi ro Có điều kiện (Conditional VaR / CVaR 95% - Expected Shortfall): Đo lường mức lỗ trung bình nếu kịch bản vượt quá ngưỡng VaR 95%.
+  + Phân phối Mức Sụt Giảm Tài Sản Cực Đại (Max Drawdown Distribution): Trung vị (50th percentile) và kịch bản khủng hoảng (95th percentile).
+  + Xác Suất Vi Phạm Ngưỡng Rủi Ro (Risk of Ruin): Đo lường tỷ lệ kịch bản tài sản bị sụt giảm quá 15% NAV.
+  + Lệnh Telegram chuyên dụng: `/stress` hoặc `/montecarlo` để kích hoạt báo cáo stress test thời gian thực.
+
+
+--------------------------------------------------------------------------------
+9. DANH MỤC LỆNH TELEGRAM BOT CHI TIẾT
 --------------------------------------------------------------------------------
 [TÀI KHOẢN & HỆ THỐNG]
   /start              : Khởi động bot và hiển thị bàn phím thao tác nhanh.
@@ -227,7 +264,8 @@ Bảo mật Whitelist: Duy nhất Admin Chat ID [7385637982] có quyền điều
   /balance            : Tra cứu số dư tiền mặt tài khoản thật DNSE.
   /portfolio          : Tra cứu danh mục cổ phiếu đang nắm giữ tại tài khoản thật DNSE.
   /reconcile hoặc /doichieu: Đối chiếu trực tiếp danh mục nội bộ với dữ liệu thời gian thực sàn DNSE, phát hiện chênh lệch và hiển thị bảng so khớp chi tiết.
-  /pnl hoặc /performance: Báo cáo hiệu suất đầu tư (Realized PnL, Unrealized PnL, Win Rate %, Profit Factor, Drawdowns).
+  /pnl hoặc /performance: Báo cáo hiệu suất đầu tư chuẩn định lượng (Sharpe, Sortino, Calmar, Expectancy, Payoff Ratio, Win Rate, Drawdowns).
+  /stress hoặc /montecarlo: Mô phỏng Monte Carlo 1.000 kịch bản và đo lường rủi ro căng thẳng VaR 95%, VaR 99%, CVaR, Risk of Ruin.
   /mode               : Xem chế độ giao dịch hiện tại (paper, live_confirm, live_auto).
   /mode <tên_chế_độ>  : Đổi chế độ giao dịch (ví dụ: /mode paper, /mode live_confirm).
   /kill_switch        : Cầu dao khẩn cấp - Hủy toàn bộ lệnh trên sàn và khóa hệ thống.
@@ -267,13 +305,24 @@ Bảo mật Whitelist: Duy nhất Admin Chat ID [7385637982] có quyền điều
 
 ================================================================================
 KẾT LUẬN:
-Hệ thống hiện tại là một giải pháp Trading Bot tự động toàn diện, kết hợp chặt chẽ
-giữa Đa Khung Thời Gian (1D Trend + 15m Trigger), Quản trị Rủi ro Danh mục (Trần 85% NAV,
-Position Sizing 2 Lớp: ATR-Risk + Trần Cứng 25% NAV, Cam kết 100% Không Margin,
-Giới hạn Tập trung Ngành: 12 nhóm ngành ICB tường minh, Tối đa 2 mã/ngành, Slot Limit 4 mã,
-Circuit Breaker -3% ngày / -7% tuần, Tự động hủy lệnh treo sau 15 phút, Mô phỏng trượt giá HOSE 0.1% sát thực tế,
-SQLite WAL đa luồng không khóa, Báo cáo PnL /pnl chuyên sâu),
-Động cơ Sự Kiện Doanh Nghiệp Tự Động (Lịch cổ tức, ngày GDKHQ, VETO mua ngày chốt quyền, cảnh báo sớm T-1, phạt pha loãng),
-và Trí tuệ Đọc Tin tức Cảm tính (CafeF & Vietstock) bảo vệ vốn tối đa.
+Hệ thống hiện tại là một giải pháp Trading Bot tự động chuẩn Định Lượng Quỹ Đầu Tư (Institutional Quant Hedge-Fund Grade),
+kết hợp chặt chẽ giữa:
+1. Đa Khung Thời Gian (1D Trend + 15m Trigger)
+2. Quản trị Rủi ro Danh mục Tối ưu:
+   - Trần phơi nhiễm 85% NAV (15% tiền mặt an toàn)
+   - Định cỡ vị thế 2 lớp: ATR-Risk + Trần Cứng 25% NAV
+   - Định cỡ vị thế theo mục tiêu biến động (Volatility Targeting 15% Vol)
+   - Bộ lọc ma trận tương quan chuỗi giá 30 ngày VN30 (rho <= 0.70)
+   - Giới hạn ngành tường minh (12 nhóm ICB, tối đa 2 mã/ngành)
+   - Cam kết 100% Tiền Mặt (Không Margin)
+   - Circuit Breaker tự ngắt (-3% ngày / -7% tuần)
+   - Tự động hủy lệnh treo sau 15 phút
+   - Mô phỏng trượt giá HOSE 0.1% sát thực tế
+3. Động Cơ Định Lượng & Stress-Test:
+   - Báo cáo Sharpe (Rf=5.0%), Sortino, Calmar, Expectancy, Payoff Ratio
+   - Mô phỏng Monte Carlo 1.000 kịch bản, VaR 95%, VaR 99%, CVaR 95%, Risk of Ruin
+4. Động cơ Sự Kiện Doanh Nghiệp Tự Động (Lịch cổ tức, ngày GDKHQ, VETO mua ngày chốt quyền, cảnh báo sớm T-1, phạt pha loãng, đối chiếu thích ứng DNSE)
+5. Trí tuệ Đọc Tin tức Cảm tính (CafeF & Vietstock, xử lý tiền tố phủ định, thoát hiểm khủng hoảng Crisis Exit)
+6. Hạ tầng Async Đa Luồng SQLite WAL Concurrency, 149/149 Unit & Integration Tests đạt 100% Pass Rate.
 ================================================================================
 

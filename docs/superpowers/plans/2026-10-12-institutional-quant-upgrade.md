@@ -43,36 +43,36 @@
 ## Tasks
 
 ### Task 1: Institutional Performance Metrics Engine
-- [ ] Implement enhanced statistics calculation in `storage/repository.py`:
+- [x] Implement enhanced statistics calculation in `storage/repository.py`:
   - Fetch trade chronological history from `paper_trades`
   - Calculate cumulative equity curve
   - Calculate `max_drawdown_vnd` and `max_drawdown_pct`
   - Calculate trade returns, mean return, standard deviation, downside standard deviation
   - Calculate annualized `sharpe_ratio`, `sortino_ratio`, `calmar_ratio`
   - Calculate `expectancy_vnd` and `win_loss_ratio`
-- [ ] Update Telegram dashboard in `bot/handlers/portfolio.py` (`cmd_pnl`) to display the institutional metrics
-- [ ] Add unit tests in `tests/test_performance_analytics.py` verifying mathematical correctness
+- [x] Update Telegram dashboard in `bot/handlers/portfolio.py` (`cmd_pnl`) to display the institutional metrics
+- [x] Add unit tests in `tests/test_performance_analytics.py` verifying mathematical correctness
 
 ### Task 2: Rolling 30-Day Correlation Matrix Filter across VN30
-- [ ] Implement rolling correlation calculation in `indicators/calculator.py`:
+- [x] Implement rolling correlation calculation in `indicators/calculator.py`:
   - `calculate_price_correlation(prices_a: np.ndarray, prices_b: np.ndarray) -> float`
   - Handling of uneven lengths or flat price arrays
-- [ ] Integrate correlation filter into `strategy/auto_trader.py`:
+- [x] Integrate correlation filter into `strategy/auto_trader.py`:
   - Before buying candidate `top_signal`, compute correlation against all held positions using daily closes
   - Reject candidate if correlation > 0.70 with any active holding
   - Dispatch Telegram notification and audit alert
-- [ ] Add unit tests in `tests/test_correlation_filter.py`
+- [x] Add unit tests in `tests/test_correlation_filter.py`
 
 ### Task 3: Volatility Targeting Position Sizing
-- [ ] Enhance position sizing in `strategy/risk.py`:
+- [x] Enhance position sizing in `strategy/risk.py`:
   - Add `calculate_volatility_target_size()` / enhance `calculate_position_size()` with `target_vol_annualized: float = 0.15`
   - Sizing adapts inversely to asset's historical volatility: $\text{size} = \min(\text{cap}, (\text{Target Vol} / \text{Asset Vol}) \times \text{NAV})$
-- [ ] Integrate into `strategy/auto_trader.py`
-- [ ] Add unit tests in `tests/test_volatility_position_sizing.py`
+- [x] Integrate into `strategy/auto_trader.py`
+- [x] Add unit tests in `tests/test_volatility_position_sizing.py`
 
 ### Task 4: Monte Carlo Simulation & Stress Testing Engine
-- [ ] Create `strategy/stress_test.py`:
+- [x] Create `strategy/stress_test.py`:
   - `run_monte_carlo_simulation(trades_pnl: List[float], initial_capital: float, num_simulations: int = 1000, horizon_trades: int = 100) -> MonteCarloResult`
   - Compute VaR (95%, 99%), CVaR (95%), Max Drawdown distribution (50th, 95th, 99th percentile), Probability of Ruin (< 15% drawdown)
-- [ ] Add `/stress` Telegram command in `bot/handlers/portfolio.py`
-- [ ] Add comprehensive tests in `tests/test_stress_testing.py`
+- [x] Add `/stress` Telegram command in `bot/handlers/portfolio.py`
+- [x] Add comprehensive tests in `tests/test_stress_testing.py`

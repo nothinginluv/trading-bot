@@ -26,6 +26,7 @@ PHẦN 2: CÁC NGUYÊN TẮC HOẠT ĐỘNG & BẢO VỆ TÀI KHOẢN
   2.7. Cơ chế Cầu dao tự ngắt & Hủy lệnh treo quá hạn
   2.8. Bộ phân tích tin tức cảm tính & Thoát hiểm khủng hoảng (Crisis Exit)
   2.9. Động cơ sự kiện doanh nghiệp & Điều chỉnh kỹ thuật ngày GDKHQ
+  2.10. Hệ thống định lượng Hedge Fund: Tương quan 30 ngày, Volatility Sizing & Stress-Test Monte Carlo
 
 PHẦN 3: BẢNG TRA CỨU TOÀN BỘ LỆNH TELEGRAM VÀ BÀN PHÍM THAO TÁC
   3.1. Các nút bấm trên Bàn phím nhanh (Reply Keyboard)
@@ -35,7 +36,7 @@ PHẦN 3: BẢNG TRA CỨU TOÀN BỘ LỆNH TELEGRAM VÀ BÀN PHÍM THAO TÁC
   3.5. Nhóm lệnh Tin tức & Sự kiện Doanh nghiệp
   3.6. Nhóm lệnh Mô phỏng Paper Trading (Giao dịch ảo)
   3.7. Nhóm lệnh Đặt lệnh thật trên sàn HOSE (Live Trading)
-  3.8. Nhóm lệnh Báo cáo Hiệu suất Đầu tư (PnL Analytics)
+  3.8. Nhóm lệnh Báo cáo Hiệu suất Đầu tư & Stress-Test (PnL & Quant Metrics)
 
 PHẦN 4: HƯỚNG DẪN THỰC HÀNH THEO CÁC KỊCH BẢN THỰC TẾ
   4.1. Kịch bản 1: Người mới bắt đầu làm quen với Paper Trading
@@ -225,6 +226,29 @@ Hệ thống áp dụng các quy chuẩn quản trị vốn chuyên nghiệp:
   + Chạy định kỳ (mỗi 30 phút vào ngày có sự kiện quyền, mỗi 60 phút ngày thường).
   + Lệnh thủ công `/reconcile` (hoặc `/doichieu`): So sánh số lượng và giá vốn nội bộ với dữ liệu chính thức từ sàn DNSE. Nếu phát hiện lệch, bot ưu tiên đồng bộ theo số liệu DNSE.
 
+2.10. HỆ THỐNG ĐỊNH LƯỢNG HEDGE FUND: BỘ LỌC TƯƠNG QUAN 30 NGÀY, ĐỊNH CỠ THEO BIẾN ĐỘNG & STRESS-TEST MONTE CARLO
+--------------------------------------------------------------------------------
+Hệ thống nâng cấp động cơ định lượng theo chuẩn các quỹ đầu tư tổ chức (Institutional Quant Upgrade):
+- Bộ lọc Ma trận Tương quan Chuỗi giá 30 Ngày VN30 (Rolling 30-Day Pearson Correlation Filter):
+  + Tính toán ma trận hệ số tương quan Pearson giữa chuỗi tỷ suất lợi nhuận nến ngày của 30 mã VN30:
+    rho = Cov(Ra, Rb) / (sigma_a * sigma_b).
+  + Trước khi Auto-Trader đặt lệnh MUA, bot tự động tính tương quan giữa mã tiềm năng và tất cả các mã đang nắm giữ.
+  + Nếu hệ số rho > 0.70 với bất kỳ cổ phiếu nào đang giữ: Bot TỰ ĐỘNG VETO (Từ chối mua) nhằm ngăn ngừa tình trạng tập trung danh mục vào các tài sản biến động đồng pha, giảm thiểu rủi ro hệ thống.
+- Định cỡ Vị thế theo Mục tiêu Biến động (Volatility Targeting Position Sizing):
+  + Tự động thích ứng quy mô lệnh theo nguyên tắc phân bổ rủi ro đồng đều (Risk Parity):
+    Weight = Target_Vol / Asset_Vol (mục tiêu độ biến động danh mục 15%/năm).
+  + Mã có độ biến động cao (rung lắc mạnh) -> Giảm bớt khối lượng giải ngân.
+  + Mã tích lũy ít biến động -> Phân bổ khối lượng hợp lý nhưng luôn bị khóa cứng ở trần 25% NAV và phơi nhiễm tối đa 85% NAV.
+- Động cơ Mô phỏng Monte Carlo & Stress-Testing Đuôi Rủi ro:
+  + Chạy 1.000+ đường mô phỏng ngẫu nhiên (Bootstrap Resampling) bằng phương pháp ghép lãi hình học (Geometric Compounding) cho 100 giao dịch tiếp theo.
+  + Đo lường chính xác các chỉ số rủi ro căng thẳng:
+    * VaR 95% (Value at Risk): Mức tổn thất tối đa ở phân vị 95%.
+    * VaR 99% (Extreme Stress): Mức tổn thất trong kịch bản thị trường đặc biệt tiêu cực.
+    * CVaR 95% (Expected Shortfall): Mức lỗ trung bình khi rủi ro vượt ngưỡng VaR 95%.
+    * Max Drawdown Kịch bản Khủng hoảng (95th percentile).
+    * Xác suất Chạm ngưỡng Sụt giảm 15% (Risk of Ruin).
+  + Kích hoạt tức thì qua lệnh Telegram: `/stress` hoặc `/montecarlo`.
+
 
 ================================================================================
 PHẦN 3: BẢNG TRA CỨU TOÀN BỘ LỆNH TELEGRAM VÀ BÀN PHÍM THAO TÁC
@@ -359,18 +383,32 @@ Khi mở Telegram, bạn sẽ thấy bàn phím gồm 12 nút bấm tiện lợi
 4. `/cancel_live <MÃ_LỆNH>`
    - Chức năng: Gửi yêu cầu hủy lệnh thật đang chờ khớp.
 
-3.8. NHÓM LỆNH BÁO CÁO HIỆU SUẤT ĐẦU TƯ (PNL ANALYTICS)
+3.8. NHÓM LỆNH BÁO CÁO HIỆU SUẤT ĐẦU TƯ & KIỂM ĐỊNH STRESS-TEST (PNL & QUANT METRICS)
 --------------------------------------------------------------------------------
 1. `/pnl` (hoặc `/performance`, hoặc nút bấm [📊 Hiệu suất PnL])
-   - Chức năng: Hiển thị bảng tổng kết hiệu suất đầu tư toàn diện:
+   - Chức năng: Hiển thị bảng tổng kết hiệu suất đầu tư toàn diện chuẩn định lượng:
      + Tổng tài sản (NAV) và Vốn ban đầu.
      + Tỷ lệ phơi nhiễm danh mục (% NAV) so với trần 85%.
      + Lãi/Lỗ đã chốt (Realized PnL) và Lãi/Lỗ tạm tính (Unrealized PnL).
      + Tỷ lệ thắng (Win Rate %): Số lệnh thắng / Tổng số lệnh đã chốt.
      + Thống kê số lệnh Thắng 🟢 / Thua 🔴 / Hòa ⚪.
-     + Hệ số Lợi nhuận (Profit Factor).
+     + Hệ số Lợi nhuận (Profit Factor) và Kỳ vọng lợi nhuận / lệnh (Mathematical Expectancy VNĐ).
+     + Tỷ lệ Lãi/Lỗ trung bình (Payoff Ratio).
      + Lệnh lãi lớn nhất và Lệnh lỗ nặng nhất.
+     + Các chỉ số rủi ro định lượng tổ chức (Institutional Metrics):
+       * Sharpe Ratio (Rf = 5.0%, thường niên hóa căn 250 ngày).
+       * Sortino Ratio (đo lường rủi ro trên Downside Deviation).
+       * Calmar Ratio (Tỷ lệ Lợi nhuận / Max Drawdown).
+       * Mức sụt giảm tối đa lịch sử (Max Drawdown % và VNĐ).
      + Mức sụt giảm tài sản (Drawdown) trong ngày và trong tuần so với ngưỡng Cầu dao ngắt tự động (-3% ngày / -7% tuần).
+
+2. `/stress` (hoặc `/montecarlo`)
+   - Chức năng: Kích hoạt mô phỏng Monte Carlo 1.000 kịch bản cho 100 lệnh kế tiếp dựa trên chuỗi tỷ suất sinh lời thực tế của bot.
+   - Kết quả phân tích:
+     + Kịch bản Lạc quan (95th percentile), Kỳ vọng (Median), Bất lợi (5th percentile).
+     + Đo lường rủi ro đuôi: VaR 95%, VaR 99%, CVaR 95% (Expected Shortfall).
+     + Mức Max Drawdown kịch bản khủng hoảng và Xác suất vi phạm ngưỡng sụt giảm 15% (Risk of Ruin).
+     + Đưa ra khuyến nghị định lượng tức thì về an toàn vốn danh mục.
 
 
 ================================================================================
